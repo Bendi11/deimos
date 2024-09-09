@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "deimosd",
+    "deimos-client",
+    "deimos-shared"
+]
