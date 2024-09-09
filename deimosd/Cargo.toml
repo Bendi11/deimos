@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+rustls = { workspace = true }
+tonic = { workspace = true, features = ["server", "router"] }
+deimos-shared = { path = "../deimos-shared", features = ["server"] }
+async-trait = "0.1"

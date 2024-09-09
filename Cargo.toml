@@ -2,6 +2,17 @@
 resolver = "2"
 members = [
     "deimosd",
-    "deimos-client",
-    "deimos-shared"
+    "deimos-shared",
+    "deimos-client"
 ]
+
+[workspace.dependencies]
+rustls = { version = "0.23" }
+
+[workspace.dependencies.tonic]
+version = "0.12"
+default-features = false
+features = ["tls", "transport", "prost"]
+
+[workspace.dependencies.tokio]
+version = "1.40"

@@ -1,14 +1,15 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+mod pb {
+    tonic::include_proto!("deimos");
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use crate::pb::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+#[cfg(feature="server")]
+pub mod server {
+    pub use crate::pb::deimos_server::*;
+}
+
+#[cfg(feature="channel")]
+pub mod channel {
+    pub use crate::pb::deimos_client::*;
 }
