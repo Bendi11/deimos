@@ -1,8 +1,0 @@
-syntax = "proto3";
-package deimos.status;
-
-message ServerStatusResponse {
-    string server_name = 1;
-}
-
-message ServerStatusRequest {}

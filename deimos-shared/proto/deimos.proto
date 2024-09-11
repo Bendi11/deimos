@@ -1,9 +1,0 @@
-syntax = "proto3";
-package deimos;
-
-import "status.proto";
-
-
-service DeimosService {
-    rpc ServerStatus(status.ServerStatusRequest) returns (status.ServerStatusResponse) {}
-}
