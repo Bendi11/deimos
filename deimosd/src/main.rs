@@ -110,14 +110,17 @@ async fn main() -> ExitCode {
         }
     };
     
-    log::trace!("Starting tonic gRPC server");
+    log::trace!("Starting tonic gRPC server @ {}:{}", conf.bind, conf.port);
 
     match server
         .timeout(Duration::from_secs(30))
         .add_service(DeimosServiceServer::new(state))
         .serve(SocketAddr::new(conf.bind, conf.port))
         .await {
-        Ok(_) => ExitCode::SUCCESS,
+        Ok(_) => {
+            log::info!("Server exited successfully");
+            ExitCode::SUCCESS
+        },
         Err(e) => {
             log::error!("tonic server error: {e}");
             ExitCode::FAILURE
