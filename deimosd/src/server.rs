@@ -1,46 +1,45 @@
-use std::sync::Arc;
-
-use chacha20poly1305::{ChaCha20Poly1305, Key, KeySizeUser};
+use chacha20poly1305::{aead::OsRng, ChaCha20Poly1305, KeyInit};
+use conn::Connection;
 use tokio::net::TcpListener;
 
-use crate::{config::DeimosConfig, util};
+use deimos_shared::key;
 
+use crate::config::DeimosConfig;
 
-/// All maintained server state including Docker API connection,
-/// certificates and CA public keys to use when authenticating clients
+pub mod conn;
+
+/// RPC server that listens for TCP connections and spawns tasks to serve clients
 pub struct Server {
     listener: TcpListener,
-    //pub docker: Docker,
 }
 
 impl Server {
     /// Create a new server instance, loading all required files from the configuration specified
     /// and creating a TCP listener for the control interface.
     pub async fn new(config: DeimosConfig) -> Result<Self, ServerInitError> {
-        let key_str = util::load_check_permissions(&config.keyfile).await?;
-        let key_pem = pem::parse(key_str)?;
-        if key_pem.tag() != "DEIMOS SYMMETRIC KEY" {
-            tracing::warn!("key pem file has unrecognized tag {}", key_pem.tag());
+        if !tokio::fs::try_exists(&config.keyfile).await? {
+            tracing::info!("Key file {} does not exist, creating and setting permissions", config.keyfile.display());
+            let key = ChaCha20Poly1305::generate_key(&mut OsRng);
+            key::save_symmetric_pem(&config.keyfile, key).await?;
         }
 
-        if key_pem.contents().len() != ChaCha20Poly1305::key_size() {
-            return Err(ServerInitError::InvalidKeySize(key_pem.contents().len()))
-        }
-
-        let key = Key::from_slice(key_pem.contents());
-
+        let key = key::load_symmetric_pem(config.keyfile).await?;
         let listener = TcpListener::bind(config.bind).await?;
 
         Ok(Self {
             listener
         })
     }
-
-    pub async fn serve(self: Arc<Self>) {
+    
+    /// Await TCP connections on the address specified in the configuration
+    pub async fn serve(self) -> ! {
         loop {
             match self.listener.accept().await {
                 Ok((conn, addr)) => {
                     tracing::debug!("Accepted connection from {addr}");
+
+                    let conn = Connection::new(conn);
+                    tokio::task::spawn(conn.serve());
                 },
                 Err(e) => {
                     tracing::warn!("Failed to accept TCP connection: {e}");
@@ -55,8 +54,6 @@ impl Server {
 pub enum ServerInitError {
     #[error("I/O error: {0}")]
     IO(#[from] std::io::Error),
-    #[error("PEM decode error: {0}")]
-    PEM(#[from] pem::PemError),
-    #[error("Invalid key size: {}B")]
-    InvalidKeySize(usize),
+    #[error("Failed to load key: {0}")]
+    Key(#[from] deimos_shared::key::DeimosKeyError),
 }

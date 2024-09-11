@@ -4,10 +4,10 @@ use config::DeimosConfig;
 use igd_next::{PortMappingProtocol, SearchOptions};
 use serde::Deserialize;
 use server::Server;
+use deimos_shared::util;
 
 mod config;
 mod server;
-pub mod util;
 
 const CONFIG_PATH: &str = "./deimos.toml";
 
@@ -60,14 +60,15 @@ async fn main() -> ExitCode {
         tracing::error!("Failed to add port mapping: {e}");
     }*/
 
-    let state = Server {
-
-    };
-
-    
-    tracing::trace!("Starting tonic gRPC server @ {}", conf.bind);
-    
-    ExitCode::SUCCESS
+    match Server::new(conf).await {
+        Ok(server) => {
+            server.serve().await
+        },
+        Err(e) => {
+            tracing::error!("Failed to initialize server - {e}");
+            ExitCode::FAILURE
+        }
+    } 
 }
 
 
