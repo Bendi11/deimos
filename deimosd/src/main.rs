@@ -26,7 +26,6 @@ async fn main() -> ExitCode {
         log::error!("Failed to install default rustls cryptography provider: {e:?}");
         return ExitCode::FAILURE
     }
-
     log::trace!("Installed aws_lc crypto provider");
 
     let config_str = match load_check_permissions(CONFIG_PATH).await {
