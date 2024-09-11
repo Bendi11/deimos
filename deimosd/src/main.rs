@@ -1,7 +1,8 @@
-use std::{net::SocketAddr, path::Path, process::ExitCode, time::Duration};
+use std::{net::{IpAddr, SocketAddr}, path::Path, process::ExitCode, str::FromStr, time::Duration};
 
 use config::DeimosConfig;
 use deimos_shared::server::DeimosServiceServer;
+use igd_next::{PortMappingProtocol, SearchOptions};
 use logger::Logger;
 use serde::Deserialize;
 use server::ServerState;
@@ -68,6 +69,29 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE
         }
     };
+
+    let gateway = match igd_next::aio::tokio::search_gateway(SearchOptions {
+        timeout: Some(Duration::from_secs(60)),
+        ..Default::default()
+    }).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("Failed to discover IGD enabled device: {e}");
+            return ExitCode::FAILURE
+        }
+    };
+
+    log::trace!("Found IGD gateway {}", gateway.addr);
+
+    if let Err(e) = gateway.add_port(
+        PortMappingProtocol::TCP,
+        conf.port,
+        SocketAddr::new(IpAddr::from_str("192.168.1.204").unwrap(), conf.port),
+        10000,
+        "test IGD"
+    ).await {
+        log::error!("Failed to add port mapping: {e}");
+    }
 
     let state = ServerState {
 
