@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 deimos-shared = { path = "../deimos-shared" }
-tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
 
 [dependencies.iced]
 version = "0.12"

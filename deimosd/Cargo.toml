@@ -7,7 +7,7 @@ license = "none"
 
 [dependencies]
 deimos-shared = { path = "../deimos-shared" }
-tokio = { workspace = true, features = ["rt-multi-thread", "fs"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "fs", "macros"] }
 thiserror = "1.0"
 futures = "0.3"
 
@@ -19,6 +19,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 toml = "0.8"
+
+chacha20poly1305 = { workspace = true }
+pem = { workspace = true }
 
 
 [package.metadata.deb]

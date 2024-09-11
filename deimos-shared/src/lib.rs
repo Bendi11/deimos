@@ -4,6 +4,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub mod header;
 pub mod model;
+pub mod key;
+pub mod util;
 
 pub use header::MessageHeader;
 

@@ -1,14 +1,8 @@
-use std::sync::Arc;
-
-use deimos_shared::{channel::DeimosServiceClient, status::ServerStatusRequest};
 use iced::{widget::{button, column, text}, Application, Command, Element};
-use tokio::sync::Mutex;
-use tonic::transport::Channel;
 
 
 pub struct DeimosApplication {
     status: Option<String>,
-    grpc: Arc<Mutex<DeimosServiceClient<Channel>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,7 +15,7 @@ impl Application for DeimosApplication {
     type Message = DeimosMessage;
     type Executor = iced::executor::Default;
     type Theme = iced::Theme;
-    type Flags = Channel;
+    type Flags = ();
 
     fn title(&self) -> String {
         "Deimos".to_owned()
@@ -31,7 +25,6 @@ impl Application for DeimosApplication {
         (
             Self {
                 status: None,
-                grpc: Arc::new(Mutex::new(DeimosServiceClient::new(flags)))
             },
             Command::none()
         )
@@ -45,18 +38,6 @@ impl Application for DeimosApplication {
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        let grpc = self.grpc.clone();
-        match message {
-            DeimosMessage::RequestStatus => Command::perform(
-                async move {
-                    grpc.lock().await.server_status(ServerStatusRequest {}).await
-                },
-                |status| DeimosMessage::StatusRecv(format!("{:?}", status))
-            ),
-            DeimosMessage::StatusRecv(val) => {
-                self.status = Some(val);
-                Command::none()
-            }
-        }
+        Command::none()
     }
 }
