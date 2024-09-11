@@ -1,6 +1,4 @@
-use std::path::Path;
 
-use bollard::Docker;
 use async_trait::async_trait;
 use deimos_shared::{server::DeimosService, status::{ServerStatusRequest, ServerStatusResponse}};
 use tonic::{Request, Response};
@@ -9,7 +7,7 @@ use tonic::{Request, Response};
 /// All maintained server state including Docker API connection,
 /// certificates and CA public keys to use when authenticating clients
 pub struct ServerState {
-    pub docker: Docker,
+    //pub docker: Docker,
 }
 
 #[async_trait]

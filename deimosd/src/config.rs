@@ -1,34 +1,31 @@
-use std::path::Path;
+use std::{net::IpAddr, path::{Path, PathBuf}};
 
 
 
 /// Configuration used to initialize the server's authentication data and Docker connection
 #[derive(Debug, serde::Deserialize)]
-pub struct DeimosConfig<'a> {
-    pub port: Option<u16>,
-    #[serde(borrow)]
-    pub cert: DeimosAuthenticationConfig<'a>
+pub struct DeimosConfig {
+    pub bind: IpAddr,
+    pub port: u16,
+    pub cert: DeimosAuthenticationConfig
 }
 
 #[derive(Debug, serde::Deserialize)]
-pub struct DeimosAuthenticationConfig<'a> {
+pub struct DeimosAuthenticationConfig {
     /// Path to the X.509 certificate used as the CA when authenticating client connections
-    #[serde(borrow)]
-    pub ca_root: &'a Path,
+    pub ca_root: PathBuf,
     /// Path to public X.509 certificate to present to clients
-    #[serde(borrow)]
-    pub identity_cert: &'a Path,
+    pub identity_cert: PathBuf,
     /// Path to the server's private key file
-    #[serde(borrow)]
-    pub identity_key: &'a Path,
+    pub identity_key: PathBuf,
 }
 
-impl Default for DeimosAuthenticationConfig<'static> {
+impl Default for DeimosAuthenticationConfig {
     fn default() -> Self {
         Self {
-            ca_root: Path::new("./ca_cert.pem"),
-            identity_cert: Path::new("./identity.pem"),
-            identity_key: Path::new("./identity_key.pem")
+            ca_root: PathBuf::from("./ca_cert.pem"),
+            identity_cert: PathBuf::from("./identity.pem"),
+            identity_key: PathBuf::from("./identity_key.pem")
         }
     }
 }

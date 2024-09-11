@@ -1,9 +1,12 @@
-use std::{path::Path, process::ExitCode};
+use std::{net::SocketAddr, path::Path, process::ExitCode, time::Duration};
 
 use config::DeimosConfig;
+use deimos_shared::server::DeimosServiceServer;
 use logger::Logger;
 use serde::Deserialize;
+use server::ServerState;
 use tokio::{fs::File, io::AsyncReadExt};
+use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 
 mod config;
 mod server;
@@ -25,32 +28,85 @@ async fn main() -> ExitCode {
 
     log::trace!("Installed aws_lc crypto provider");
 
-    let Ok(mut config_file) = load_check_permissions(CONFIG_PATH).await else { return ExitCode::FAILURE };
-
-    let mut config_str = String::new();
-    if let Err(e) = config_file.read_to_string(&mut config_str).await {
-        log::error!("Failed to read config file: {e}");
-        return ExitCode::FAILURE
-    }
+    let config_str = match load_check_permissions(CONFIG_PATH).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("Failed to load config file {CONFIG_PATH}: {e}");
+            return ExitCode::FAILURE
+        }
+    };
     
     let toml_de = toml::Deserializer::new(&config_str);
-    let config = match DeimosConfig::deserialize(toml_de) {
+    let conf = match DeimosConfig::deserialize(toml_de) {
         Ok(v) => v,
         Err(e) => {
             log::error!("Failed to parse config file at {CONFIG_PATH}: {e}");
             return ExitCode::FAILURE
         }
     };
+
+    let ca_cert = match load_check_permissions(&conf.cert.ca_root).await {
+        Ok(v) => Certificate::from_pem(v),
+        Err(e) => {
+            log::error!("Failed to load CA certificate at {}: {e}", conf.cert.ca_root.display());
+            return ExitCode::FAILURE
+        }
+    };
+
+    let identity_cert = match load_check_permissions(&conf.cert.identity_cert).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("Failed to load identity certificate {}: {e}", conf.cert.identity_cert.display());
+            return ExitCode::FAILURE
+        }
+    };
+
+    let identity_key = match load_check_permissions(&conf.cert.identity_key).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::error!("Failed to load identity key {}: {e}", conf.cert.identity_key.display());
+            return ExitCode::FAILURE
+        }
+    };
+
+    let state = ServerState {
+
+    };
+
+    let server = match Server::builder()
+        .tls_config(ServerTlsConfig::new()
+            .identity(Identity::from_pem(identity_cert, identity_key))
+            .client_ca_root(ca_cert)
+            .client_auth_optional(false)
+        ) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("Failed to set TLS config for server: {e:?}");
+            return ExitCode::FAILURE
+        }
+    };
     
-    ExitCode::SUCCESS
+    log::trace!("Starting tonic gRPC server");
+
+    match server
+        .timeout(Duration::from_secs(30))
+        .add_service(DeimosServiceServer::new(state))
+        .serve(SocketAddr::new(conf.bind, conf.port))
+        .await {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            log::error!("tonic server error: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
-async fn load_check_permissions(path: impl AsRef<Path>) -> Result<File, std::io::Error> {
-    let file = File::open(&path).await?;
+async fn load_check_permissions(path: impl AsRef<Path>) -> Result<String, std::io::Error> {
+    let mut file = File::open(&path).await?;
+    let meta = file.metadata().await?;
 
     #[cfg(unix)]
     {
-        let meta = file.metadata().await?;
         let permissions = meta.permissions();
         use std::os::unix::fs::PermissionsExt;
         let mode = permissions.mode();
@@ -59,6 +115,9 @@ async fn load_check_permissions(path: impl AsRef<Path>) -> Result<File, std::io:
             return Err(tokio::io::ErrorKind::InvalidInput.into())
         }
     }
+    
+    let mut string = String::with_capacity(meta.len() as usize);
+    file.read_to_string(&mut string).await?;
 
-    Ok(file)
+    Ok(string)
 }

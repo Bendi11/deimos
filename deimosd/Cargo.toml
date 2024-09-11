@@ -1,7 +1,9 @@
 [package]
 name = "deimosd"
+authors = ["Ben"]
 version = "0.1.0"
 edition = "2021"
+license = "none"
 
 [dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "fs"] }
@@ -17,3 +19,8 @@ bollard = "0.17"
 log = { workspace = true }
 serde = { workspace = true }
 toml = "0.8"
+
+
+[package.metadata.deb]
+maintainer-scripts = "debian"
+systemd-units = { enable = true }

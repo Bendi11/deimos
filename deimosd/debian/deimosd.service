@@ -1,0 +1,10 @@
+[Unit]
+Description="Deimos container management gRPC server"
+
+[Service]
+ExecStart=/usr/bin/deimosd
+User=deimos
+WorkingDirectory=/home/deimos
+
+[Install]
+WantedBy=network.target
