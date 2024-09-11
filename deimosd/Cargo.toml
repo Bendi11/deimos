@@ -4,8 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "fs"] }
 rustls = { workspace = true }
 tonic = { workspace = true, features = ["server", "router"] }
 deimos-shared = { path = "../deimos-shared", features = ["server"] }
 async-trait = "0.1"
+thiserror = "1.0"
+futures = "0.3"
+
+bollard = "0.17"
+
+log = { workspace = true }
+serde = { workspace = true }
+toml = "0.8"

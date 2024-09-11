@@ -1,12 +1,9 @@
 syntax = "proto3";
 package deimos;
 
-message ServerStatus {
-    string server_name = 1;
-}
+import "status.proto";
 
-message StatusRequest {}
 
-service Deimos {
-    rpc Status(StatusRequest) returns (ServerStatus) {}
+service DeimosService {
+    rpc ServerStatus(status.ServerStatusRequest) returns (status.ServerStatusResponse) {}
 }

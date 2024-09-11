@@ -7,3 +7,7 @@ edition = "2021"
 rustls = { workspace = true }
 tonic = { workspace = true, features = ["channel"] }
 deimos-shared = { path = "../deimos-shared", features = ["channel"] }
+
+[dependencies.iced]
+version = "0.12"
+features = ["tokio", "image"]

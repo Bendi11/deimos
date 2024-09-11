@@ -9,6 +9,10 @@ members = [
 [workspace.dependencies]
 rustls = { version = "0.23" }
 
+serde = { version = "1.0", features = ["derive"] }
+
+log = "0.4"
+
 [workspace.dependencies.tonic]
 version = "0.12"
 default-features = false
