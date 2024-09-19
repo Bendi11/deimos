@@ -55,4 +55,9 @@ impl DockerService {
             docker,
         })
     }
+    
+    /// Get a handle to the connected Docker client
+    pub fn client(&self) -> &Docker {
+        &self.docker
+    }
 }
