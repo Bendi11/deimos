@@ -1,13 +1,11 @@
-use std::{process::ExitCode, time::Duration};
+use std::process::ExitCode;
 
-use config::DeimosConfig;
-use igd_next::{PortMappingProtocol, SearchOptions};
 use serde::Deserialize;
-use server::Server;
+use server::{Deimos, DeimosConfig};
 use deimos_shared::util;
 
-mod config;
 mod server;
+mod services;
 
 const CONFIG_PATH: &str = "./deimos.toml";
 
@@ -36,39 +34,12 @@ async fn main() -> ExitCode {
         }
     };
 
-    
-    let gateway = match igd_next::aio::tokio::search_gateway(SearchOptions {
-        timeout: Some(Duration::from_secs(60)),
-        ..Default::default()
-    }).await {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::error!("Failed to discover IGD enabled device: {e}");
-            return ExitCode::FAILURE
-        }
-    };
-
-    tracing::trace!("Found IGD gateway {}", gateway.addr);
-
-    /*if let Err(e) = gateway.add_port(
-        PortMappingProtocol::TCP,
-        conf.port,
-        SocketAddr::new(IpAddr::from_str("192.168.1.204").unwrap(), conf.port),
-        1,
-        "test IGD"
-    ).await {
-        tracing::error!("Failed to add port mapping: {e}");
-    }*/
-
-    match Server::new(conf).await {
-        Ok(server) => {
-            server.serve().await
-        },
-        Err(e) => {
-            tracing::error!("Failed to initialize server - {e}");
-            ExitCode::FAILURE
-        }
-    } 
+    if let Err(e) = Deimos::start(conf).await {
+        tracing::error!("Failed to start Deimos server: {e}");
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 
