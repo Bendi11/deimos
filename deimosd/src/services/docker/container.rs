@@ -7,8 +7,10 @@ use bollard::Docker;
 pub struct ManagedContainerConfig {
     /// Name that identifies this container
     pub name: String,
-    /// Image to be displayed in user interfaces
-    pub image: Option<PathBuf>,
+    /// Banner image to be displayed in user interfaces
+    pub banner_path: Option<PathBuf>,
+    /// Icon image to be displayed in user interfaces
+    pub icon_path: Option<PathBuf>,
     /// Configuration for the Docker container
     pub docker: ManagedContainerDockerConfig,
 }
@@ -19,7 +21,15 @@ pub struct ManagedContainerDockerConfig {
     /// Docker image used to create the Docker container
     pub image: String,
     /// List of volumes to mount inside the container
-    pub volumes: Vec<String>,
+    #[serde(default)]
+    pub volume: Vec<ManagedContainerDockerMountConfig>,
+}
+
+/// Configuration for a local volume mounted to a Docker container
+#[derive(Debug, serde::Deserialize)]
+pub struct ManagedContainerDockerMountConfig {
+    pub local: PathBuf,
+    pub container: PathBuf,
 }
 
 /// A managed container that represents a running or stopped container
@@ -42,7 +52,9 @@ impl ManagedContainer {
             "Loading container from config file {}",
             config_path.display()
         );
-        let config_file = tokio::fs::read_to_string(config_path).await?;
+        let config_file = tokio::fs::read_to_string(&config_path)
+            .await
+            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path, err})?;
         let config = toml::de::from_str::<ManagedContainerConfig>(&config_file)?;
         tracing::trace!("Found docker container with container name {}", config.name);
 
@@ -52,7 +64,7 @@ impl ManagedContainer {
                 tracing::info!(
                     "Loaded container config {} with Docker image ID {}",
                     config.name,
-                    id
+                    id,
                 );
 
                 Ok(Self { config })
@@ -69,8 +81,11 @@ impl ManagedContainer {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManagedContainerLoadError {
-    #[error("I/O error: {0}")]
-    IO(#[from] std::io::Error),
+    #[error("Failed to load container from config file {path}: {err}")]
+    ConfigFileIO {
+        path: PathBuf,
+        err: std::io::Error,
+    },
     #[error("Failed to parse config as TOML: {0}")]
     ConfigParse(#[from] toml::de::Error),
     #[error("Docker API error: {0}")]

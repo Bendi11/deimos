@@ -46,7 +46,7 @@ impl DockerService {
     pub async fn new(config: DockerConfig) -> Result<Self, DockerServiceInitError> {
         let docker = match config.conn {
             None => {
-                tracing::trace!("No docker config given, using platform defaults to connect");
+                tracing::info!("No docker config given, using platform defaults to connect");
                 Docker::connect_with_local_defaults()
             }
             Some(ref cfg) => {
@@ -65,10 +65,25 @@ impl DockerService {
         }?;
 
         let containers = DashMap::new();
+        
+        let dir = config.containerdir.clone();
+        let container_entries = std::fs::read_dir(&dir)
+            .map_err(|err| DockerServiceInitError::ContainersDirError { dir: dir.clone(), err })?;
 
-        let mut container_entries = tokio::fs::read_dir(&config.containerdir).await?;
-        while let Some(entry) = container_entries.next_entry().await? {
-            let container = match entry.file_type().await {
+        for entry in container_entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(e) => {
+                    tracing::warn!(
+                        "I/O error when reading entries from container config directory {}: {}",
+                        dir.display(),
+                        e
+                    );
+                    continue
+                }
+            };
+
+            let container = match entry.file_type() {
                 Ok(fty) if fty.is_dir() => {
                     ManagedContainer::load_from_dir(entry.path(), &docker).await
                 }
@@ -125,6 +140,10 @@ impl DockerService {
             }
         }
 
+        if containers.is_empty() {
+            tracing::warn!("Deimos server starting with no docker containers configured");
+        }
+
         Ok(Self {
             config,
             docker,
@@ -144,16 +163,11 @@ impl DockerService {
 pub enum DockerServiceInitError {
     #[error("Docker API error: {0}")]
     Bollard(#[from] bollard::errors::Error),
-    #[error("I/O error: {0}")]
-    IO(#[from] std::io::Error),
+    #[error("Failed to load container configs from directory {dir}: {err}")]
+    ContainersDirError {
+        dir: PathBuf,
+        err: std::io::Error
+    },
     #[error("Duplicate configurations detected for docker container with name {0}")]
     DuplicateConfiguration(String),
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DockerContainerInitError {
-    #[error("Docker API error: {0}")]
-    Bollard(#[from] bollard::errors::Error),
-    #[error("I/O error: {0}")]
-    IO(#[from] std::io::Error),
 }

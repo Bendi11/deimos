@@ -2,7 +2,7 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use chacha20poly1305::{aead::OsRng, ChaCha20Poly1305, KeyInit};
 use deimos_shared::key;
-use tokio::{net::TcpListener, sync::oneshot};
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use super::docker::DockerService;

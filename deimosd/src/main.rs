@@ -35,7 +35,7 @@ async fn main() -> ExitCode {
     };
 
     if let Err(e) = Deimos::start(conf).await {
-        tracing::error!("Failed to start Deimos server: {e}");
+        tracing::error!("{e}");
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
