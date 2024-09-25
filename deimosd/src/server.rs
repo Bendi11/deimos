@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 pub struct Deimos;
 
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeimosConfig {
     pub docker: DockerConfig,
     pub api: ApiConfig,

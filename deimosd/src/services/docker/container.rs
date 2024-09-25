@@ -4,6 +4,7 @@ use bollard::Docker;
 
 /// Configuration for a managed Docker container
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedContainerConfig {
     /// Name that identifies this container
     pub name: String,
@@ -17,6 +18,7 @@ pub struct ManagedContainerConfig {
 
 /// Configuration to be passed to Docker when  starting this container
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedContainerDockerConfig {
     /// Docker image used to create the Docker container
     pub image: String,
@@ -27,6 +29,7 @@ pub struct ManagedContainerDockerConfig {
 
 /// Configuration for a local volume mounted to a Docker container
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManagedContainerDockerMountConfig {
     pub local: PathBuf,
     pub container: PathBuf,
@@ -73,7 +76,7 @@ impl ManagedContainer {
         }
     }
 
-    /// Get the name of the Docker container when ran
+    /// Get the name of the Docker container when run
     pub fn container_name(&self) -> &str {
         &self.config.name
     }

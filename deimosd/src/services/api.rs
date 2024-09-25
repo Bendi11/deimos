@@ -15,6 +15,7 @@ pub struct ApiService {
 
 /// Configuration used to initialize and inform the Deimos API service
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ApiConfig {
     pub bind: SocketAddr,
     #[serde(default)]

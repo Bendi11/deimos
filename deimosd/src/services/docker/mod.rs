@@ -17,6 +17,7 @@ pub struct DockerService {
 
 /// Configuration for the local Docker container management service
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DockerConfig {
     pub containerdir: PathBuf,
     pub conn: Option<DockerConnectionConfig>,
@@ -24,6 +25,7 @@ pub struct DockerConfig {
 
 /// Configuration governing how the server will connect to the Docker API
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DockerConnectionConfig {
     pub kind: DockerConnectionType,
     pub addr: String,
