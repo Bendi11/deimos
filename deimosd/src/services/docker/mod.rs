@@ -41,6 +41,7 @@ pub enum DockerConnectionType {
 }
 
 impl DockerService {
+    /// Default timeout to use for Docker API when no alternative is specified in the config
     pub const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
 
     /// Load the docker service from a config file specifying how to connect to the local Docker

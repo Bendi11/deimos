@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use bollard::Docker;
 
@@ -25,6 +25,11 @@ pub struct ManagedContainerDockerConfig {
     /// List of volumes to mount inside the container
     #[serde(default)]
     pub volume: Vec<ManagedContainerDockerMountConfig>,
+    /// List of network ports to forward to the container
+    #[serde(default)]
+    pub port: Vec<ManagedContainerDockerPortConfig>,
+    #[serde(default)]
+    pub env: Vec<ManagedContainerDockerEnvConfig>,
 }
 
 /// Configuration for a local volume mounted to a Docker container
@@ -35,10 +40,38 @@ pub struct ManagedContainerDockerMountConfig {
     pub container: PathBuf,
 }
 
+/// Configuration for a network port forwarded to the Docker container
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedContainerDockerPortConfig {
+    pub expose: u16,
+    pub protocol: ManagedContainerDockerPortProtocol,
+    pub upnp: bool,
+}
+
+/// Selectable protocol for forwarded port
+#[derive(Debug, serde::Deserialize)]
+pub enum ManagedContainerDockerPortProtocol {
+    #[serde(rename = "udp")]
+    Udp,
+    #[serde(rename = "udp")]
+    Tcp,
+}
+
+/// Configuration for an environment variable to be set in the container
+#[derive(Debug, serde::Deserialize)]
+pub struct ManagedContainerDockerEnvConfig {
+    pub key: String,
+    pub value: String,
+}
+
 /// A managed container that represents a running or stopped container
 pub struct ManagedContainer {
     /// Configuration provided in a directory for this container
     pub(super) config: ManagedContainerConfig,
+    /// Directory that the container's config file was loaded from, used to build relative paths
+    /// specified in the config
+    dir: PathBuf,
 }
 
 impl ManagedContainer {
@@ -70,9 +103,73 @@ impl ManagedContainer {
                     id,
                 );
 
-                Ok(Self { config })
+                Ok(
+                    Self {
+                        dir,
+                        config
+                    }
+                )
             }
             None => Err(ManagedContainerLoadError::MissingImage(config.docker.image)),
+        }
+    }
+    
+    /// Get the container configuration options to use when creating a docker container
+    pub(super) fn docker_config(&self) -> bollard::container::Config<String> {
+        let image = Some(self.config.docker.image.clone());
+
+        let exposed_ports = (!self.config.docker.port.is_empty())
+            .then(||
+                self
+                    .config
+                    .docker
+                    .port
+                    .iter()
+                    .map(
+                        |conf| (format!("{}/{}", conf.expose, conf.protocol.docker_name()), HashMap::new())
+                    )
+                    .collect()
+            );
+
+        let env = (!self.config.docker.env.is_empty())
+            .then(||
+                self
+                    .config
+                    .docker
+                    .env
+                    .iter()
+                    .map(
+                        |var| format!("{}={}", var.key, var.value)
+                    )
+                    .collect()
+            );
+
+        let binds = (!self.config.docker.volume.is_empty())
+            .then(||
+                self
+                    .config
+                    .docker
+                    .volume
+                    .iter()
+                    .map(
+                        |volume| format!("{}:{}", volume.local.display(), volume.container.display())
+                    )
+                    .collect()
+            );
+
+        let host_config = Some(
+            bollard::models::HostConfig {
+                binds,
+                ..Default::default()
+            }
+        );
+
+        bollard::container::Config {
+            image,
+            exposed_ports,
+            env,
+            host_config,
+            ..Default::default()
         }
     }
 
@@ -80,6 +177,22 @@ impl ManagedContainer {
     pub fn container_name(&self) -> &str {
         &self.config.name
     }
+}
+
+impl ManagedContainerDockerPortProtocol {
+    /// Get the string to use when specifying the protocol to the Docker API
+    pub const fn docker_name(&self) -> &'static str {
+        match self {
+            Self::Udp => "udp",
+            Self::Tcp => "tcp",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ManagedContainerStartError {
+    #[error("Docker API error: {0}")]
+    Bollard(#[from] bollard::errors::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
