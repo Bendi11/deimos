@@ -1,8 +1,8 @@
 use std::process::ExitCode;
 
+use deimos_shared::util;
 use serde::Deserialize;
 use server::{Deimos, DeimosConfig};
-use deimos_shared::util;
 
 mod server;
 mod services;
@@ -21,16 +21,16 @@ async fn main() -> ExitCode {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("Failed to load config file {CONFIG_PATH}: {e}");
-            return ExitCode::FAILURE
+            return ExitCode::FAILURE;
         }
     };
-    
+
     let toml_de = toml::Deserializer::new(&config_str);
     let conf = match DeimosConfig::deserialize(toml_de) {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("Failed to parse config file at {CONFIG_PATH}: {e}");
-            return ExitCode::FAILURE
+            return ExitCode::FAILURE;
         }
     };
 

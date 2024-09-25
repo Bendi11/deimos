@@ -1,2 +1,2 @@
-pub mod docker;
 pub mod api;
+pub mod docker;

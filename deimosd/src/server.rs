@@ -1,15 +1,8 @@
 use std::sync::Arc;
 
 use crate::services::{
-    api::{
-        ApiConfig,
-        ApiInitError,
-        ApiService
-    },
-    docker::{
-        DockerConfig,
-        DockerService
-    }
+    api::{ApiConfig, ApiInitError, ApiService},
+    docker::{DockerConfig, DockerService},
 };
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;

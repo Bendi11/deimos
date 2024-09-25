@@ -7,13 +7,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::docker::DockerService;
 
-
 /// A connection to a remote client, with references to state required to serve RPC requests
 pub struct ApiService {
     docker: Arc<DockerService>,
     listener: TcpListener,
 }
-
 
 /// Configuration used to initialize and inform the Deimos API service
 #[derive(Debug, serde::Deserialize)]
@@ -29,24 +27,21 @@ impl ApiService {
     /// to manage containers
     pub async fn new(config: ApiConfig, docker: Arc<DockerService>) -> Result<Self, ApiInitError> {
         if !tokio::fs::try_exists(&config.keyfile).await? {
-            tracing::info!("Key file {} does not exist, creating and setting permissions", config.keyfile.display());
+            tracing::info!(
+                "Key file {} does not exist, creating and setting permissions",
+                config.keyfile.display()
+            );
             let key = ChaCha20Poly1305::generate_key(&mut OsRng);
             key::save_symmetric_pem(&config.keyfile, key).await?;
         }
 
         let listener = TcpListener::bind(config.bind).await?;
 
-        Ok(Self {
-            docker,
-            listener,
-        })
+        Ok(Self { docker, listener })
     }
 
-    pub async fn run(self: Arc<Self>, cancel: CancellationToken) {
-
-    }
+    pub async fn run(self: Arc<Self>, cancel: CancellationToken) {}
 }
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiInitError {

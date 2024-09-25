@@ -2,8 +2,6 @@ use std::path::PathBuf;
 
 use bollard::Docker;
 
-
-
 /// Configuration for a managed Docker container
 #[derive(Debug, serde::Deserialize)]
 pub struct ManagedContainerConfig {
@@ -30,15 +28,20 @@ pub struct ManagedContainer {
     pub(super) config: ManagedContainerConfig,
 }
 
-
 impl ManagedContainer {
     const CONFIG_FILENAME: &str = "container.toml";
-    
+
     /// Load a new managed container from the given configuration file, ensuring that the image
     /// name given in the config exists in the local Docker engine
-    pub(super) async fn load_from_dir(dir: PathBuf, docker: &Docker) -> Result<Self, ManagedContainerLoadError> {
+    pub(super) async fn load_from_dir(
+        dir: PathBuf,
+        docker: &Docker,
+    ) -> Result<Self, ManagedContainerLoadError> {
         let config_path = dir.join(Self::CONFIG_FILENAME);
-        tracing::trace!("Loading container from config file {}", config_path.display());
+        tracing::trace!(
+            "Loading container from config file {}",
+            config_path.display()
+        );
         let config_file = tokio::fs::read_to_string(config_path).await?;
         let config = toml::de::from_str::<ManagedContainerConfig>(&config_file)?;
         tracing::trace!("Found docker container with container name {}", config.name);
@@ -52,23 +55,17 @@ impl ManagedContainer {
                     id
                 );
 
-                Ok(
-                    Self {
-                        config,
-                    }
-                )
+                Ok(Self { config })
             }
-            None => Err(ManagedContainerLoadError::MissingImage(config.docker.image))
+            None => Err(ManagedContainerLoadError::MissingImage(config.docker.image)),
         }
     }
-
 
     /// Get the name of the Docker container when ran
     pub fn container_name(&self) -> &str {
         &self.config.name
     }
 }
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManagedContainerLoadError {
