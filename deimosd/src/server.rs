@@ -39,14 +39,15 @@ impl Deimos {
 
         #[cfg(unix)]
         {
-            let mut close = tokio::signal::unix::signal(SignalKind::terminate())
+            let mut close = tokio::signal::unix::signal(SignalKind::interrupt())
                 .map_err(ServerInitError::Signal)?;
-            tokio::select! {
-                _ = close.recv() => {
-                    cancel.cancel();
-                },
-                _ = tasks => {}
-            };
+
+
+            if let Some(()) = close.recv().await {
+                tracing::info!("Got SIGINT, shutting down deimosd");
+                cancel.cancel();
+                let _ = tasks.await;
+            } 
         }
         #[cfg(not(unix))]
         tasks.await;

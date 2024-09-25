@@ -1,13 +1,14 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use bollard::Docker;
+use tokio::sync::Mutex;
 
 /// Configuration for a managed Docker container
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedContainerConfig {
     /// Name that identifies this container
-    pub name: String,
+    pub name: Arc<str>,
     /// Banner image to be displayed in user interfaces
     pub banner_path: Option<PathBuf>,
     /// Icon image to be displayed in user interfaces
@@ -28,6 +29,7 @@ pub struct ManagedContainerDockerConfig {
     /// List of network ports to forward to the container
     #[serde(default)]
     pub port: Vec<ManagedContainerDockerPortConfig>,
+    /// List of environment variables to define for the container
     #[serde(default)]
     pub env: Vec<ManagedContainerDockerEnvConfig>,
 }
@@ -46,6 +48,7 @@ pub struct ManagedContainerDockerMountConfig {
 pub struct ManagedContainerDockerPortConfig {
     pub expose: u16,
     pub protocol: ManagedContainerDockerPortProtocol,
+    #[serde(default)]
     pub upnp: bool,
 }
 
@@ -72,6 +75,14 @@ pub struct ManagedContainer {
     /// Directory that the container's config file was loaded from, used to build relative paths
     /// specified in the config
     dir: PathBuf,
+    /// State of the container
+    pub(super) state: Mutex<Option<ManagedContainerState>>,
+}
+
+/// State populated after a Docker container is created for a [ManagedContainer]
+pub struct ManagedContainerState {
+    /// ID of the container running for this
+    pub docker_id: String,
 }
 
 impl ManagedContainer {
@@ -106,7 +117,8 @@ impl ManagedContainer {
                 Ok(
                     Self {
                         dir,
-                        config
+                        config,
+                        state: Mutex::new(None),
                     }
                 )
             }
@@ -139,7 +151,7 @@ impl ManagedContainer {
                     .env
                     .iter()
                     .map(
-                        |var| format!("{}={}", var.key, var.value)
+                        |var| format!("{}=\"{}\"", var.key, var.value)
                     )
                     .collect()
             );
@@ -171,6 +183,43 @@ impl ManagedContainer {
             host_config,
             ..Default::default()
         }
+    }
+    
+    /// Create a Docker container instance from the configuration given and rename it to match the
+    /// name given in the config
+    pub async fn create(&self, docker: &Docker) -> Result<(), ManagedContainerStartError> {
+        let config = self.docker_config();
+
+        let response = docker
+            .create_container::<String, String>(
+                None,
+                config
+            )
+            .await?;
+
+        tracing::trace!("Created container with ID {} for {}", response.id, self.container_name());
+
+        for warning in response.warnings {
+            tracing::warn!("Warning when creating container {}: {}", self.container_name(), warning);
+        }
+
+        docker
+            .rename_container(
+                &response.id,
+                bollard::container::RenameContainerOptions { name: self.container_name().to_owned() }
+            )
+            .await?;
+
+        tracing::trace!("Renamed container {}", self.container_name());
+        
+        let mut state = self.state.lock().await;
+        *state = Some(
+            ManagedContainerState {
+                docker_id: response.id
+            }
+        );
+
+        Ok(())
     }
 
     /// Get the name of the Docker container when run

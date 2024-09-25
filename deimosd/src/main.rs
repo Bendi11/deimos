@@ -1,4 +1,6 @@
 use std::process::ExitCode;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::{prelude::*, util::SubscriberInitExt, FmtSubscriber};
 
 use deimos_shared::util;
 use serde::Deserialize;
@@ -11,10 +13,19 @@ const CONFIG_PATH: &str = "./deimos.toml";
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .pretty()
+    let filter = tracing_subscriber::filter::Targets::new()
+        .with_target("bollard", LevelFilter::ERROR)
+        .with_target("deimosd", LevelFilter::TRACE);
+
+    let subscriber = FmtSubscriber::builder()
+        .compact()
+        .with_max_level(LevelFilter::TRACE)
         .with_ansi(true)
-        .with_max_level(tracing::Level::TRACE)
+        .without_time()
+        .finish();
+
+    subscriber
+        .with(filter)
         .init();
 
     let config_str = match util::load_check_permissions(CONFIG_PATH).await {
