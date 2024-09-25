@@ -4,7 +4,7 @@ use chacha20poly1305::{aead::OsRng, ChaCha20Poly1305, KeyInit};
 use deimos_shared::key;
 use tokio::net::{TcpListener, TcpStream};
 
-use super::{docker::DockerService, Deimos};
+use super::docker::DockerService;
 
 
 /// A connection to a remote client, with references to state required to serve RPC requests

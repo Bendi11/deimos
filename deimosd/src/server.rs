@@ -1,13 +1,18 @@
 use std::sync::Arc;
 
-use conn::{ApiConfig, ApiInitError, ApiService};
-use docker::{BollardError, DockerConfig, DockerService};
+use crate::services::{
+    api::{
+        ApiConfig,
+        ApiInitError,
+        ApiService
+    },
+    docker::{
+        BollardError,
+        DockerConfig,
+        DockerService
+    }
+};
 use tokio::signal::unix::SignalKind;
-
-use crate::services::valheim::{ValheimConfig, ValheimService};
-
-pub mod conn;
-pub mod docker;
 
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
 pub struct Deimos;
@@ -16,7 +21,6 @@ pub struct Deimos;
 pub struct DeimosConfig {
     pub docker: Option<DockerConfig>,
     pub api: ApiConfig,
-    pub valheim: Option<ValheimConfig>,
 }
 
 impl Deimos {
@@ -29,16 +33,10 @@ impl Deimos {
                 .map_err(ServerInitError::Docker)?,
         );
         let api = Arc::new(ApiService::new(config.api, docker.clone()).await?);
-        let valheim = Arc::new(
-            ValheimService::new(config.valheim, docker.clone())
-                .await
-                .map_err(ServerInitError::Valheim)?,
-        );
 
         let tasks = async {
             tokio::join! {
                 tokio::spawn(api.run()),
-                tokio::spawn(valheim.run()),
             }
         };
 
@@ -66,6 +64,4 @@ pub enum ServerInitError {
     Signal(std::io::Error),
     #[error("Failed to connect to Docker instance: {0}")]
     Docker(BollardError),
-    #[error("Failed to connect to Valheim docker container: {0}")]
-    Valheim(BollardError),
 }
