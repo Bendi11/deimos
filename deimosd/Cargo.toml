@@ -8,6 +8,7 @@ license = "none"
 [dependencies]
 deimos-shared = { path = "../deimos-shared" }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "macros", "signal"] }
+tokio-util = "0.7"
 thiserror = "1.0"
 futures = "0.3"
 

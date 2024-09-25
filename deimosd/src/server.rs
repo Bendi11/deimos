@@ -7,19 +7,19 @@ use crate::services::{
         ApiService
     },
     docker::{
-        BollardError,
         DockerConfig,
         DockerService
     }
 };
 use tokio::signal::unix::SignalKind;
+use tokio_util::sync::CancellationToken;
 
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
 pub struct Deimos;
 
 #[derive(Debug, serde::Deserialize)]
 pub struct DeimosConfig {
-    pub docker: Option<DockerConfig>,
+    pub docker: DockerConfig,
     pub api: ApiConfig,
 }
 
@@ -34,9 +34,12 @@ impl Deimos {
         );
         let api = Arc::new(ApiService::new(config.api, docker.clone()).await?);
 
+        let cancel = CancellationToken::new();
+
         let tasks = async {
             tokio::join! {
-                tokio::spawn(api.run()),
+                tokio::spawn(api.run(cancel.clone())),
+                tokio::spawn(docker.run(cancel.clone()))
             }
         };
 
@@ -45,7 +48,9 @@ impl Deimos {
             let mut close = tokio::signal::unix::signal(SignalKind::terminate())
                 .map_err(ServerInitError::Signal)?;
             tokio::select! {
-                _ = close.recv() => {},
+                _ = close.recv() => {
+                    cancel.cancel();
+                },
                 _ = tasks => {}
             };
         }
@@ -62,6 +67,6 @@ pub enum ServerInitError {
     Api(#[from] ApiInitError),
     #[error("Failed to create SIGTERM listener: {0}")]
     Signal(std::io::Error),
-    #[error("Failed to connect to Docker instance: {0}")]
-    Docker(BollardError),
+    #[error("Failed to initialize Docker service: {0}")]
+    Docker(crate::services::docker::DockerServiceInitError),
 }

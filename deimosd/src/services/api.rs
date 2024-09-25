@@ -2,7 +2,8 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use chacha20poly1305::{aead::OsRng, ChaCha20Poly1305, KeyInit};
 use deimos_shared::key;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{net::TcpListener, sync::oneshot};
+use tokio_util::sync::CancellationToken;
 
 use super::docker::DockerService;
 
@@ -13,6 +14,8 @@ pub struct ApiService {
     listener: TcpListener,
 }
 
+
+/// Configuration used to initialize and inform the Deimos API service
 #[derive(Debug, serde::Deserialize)]
 pub struct ApiConfig {
     pub bind: SocketAddr,
@@ -22,6 +25,8 @@ pub struct ApiConfig {
 }
 
 impl ApiService {
+    /// Load the Deimos API service configuration and store a handle to the local Docker instance
+    /// to manage containers
     pub async fn new(config: ApiConfig, docker: Arc<DockerService>) -> Result<Self, ApiInitError> {
         if !tokio::fs::try_exists(&config.keyfile).await? {
             tracing::info!("Key file {} does not exist, creating and setting permissions", config.keyfile.display());
@@ -37,10 +42,8 @@ impl ApiService {
         })
     }
 
-    pub async fn run(self: Arc<Self>) -> ! {
-        loop {
-            
-        }
+    pub async fn run(self: Arc<Self>, cancel: CancellationToken) {
+
     }
 }
 

@@ -1,11 +1,13 @@
-use std::{fs::FileType, path::PathBuf};
+use std::{path::PathBuf, sync::Arc};
 
 use bollard::Docker;
 use container::ManagedContainer;
 use dashmap::DashMap;
+use tokio_util::sync::CancellationToken;
 
 pub mod container;
 
+/// Service managing the creation and removal of Docker containers
 pub struct DockerService {
     pub config: DockerConfig,
     docker: Docker,
@@ -36,11 +38,12 @@ pub enum DockerConnectionType {
     Local,
 }
 
-pub type BollardError = bollard::errors::Error;
 
 impl DockerService {
     pub const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
-
+    
+    /// Load the docker service from a config file specifying how to connect to the local Docker
+    /// engine and where to load container configurations from
     pub async fn new(config: DockerConfig) -> Result<Self, DockerServiceInitError> {
         let docker = match config.conn {
             None => {
@@ -69,7 +72,7 @@ impl DockerService {
         let mut container_entries = tokio::fs::read_dir(&config.containerdir).await?;
         while let Some(entry) = container_entries.next_entry().await? {
             let container = match entry.file_type().await {
-                Ok(fty) if fty.is_dir() => Self::load_container_config(entry.path()).await,
+                Ok(fty) if fty.is_dir() => ManagedContainer::load_from_dir(entry.path(), &docker).await,
                 Ok(fty) if fty.is_symlink() => {
                     let meta = match tokio::fs::symlink_metadata(entry.path()).await {
                         Ok(meta) => meta,
@@ -80,7 +83,7 @@ impl DockerService {
                     };
 
                     if meta.is_dir() {
-                        Self::load_container_config(entry.path()).await
+                        ManagedContainer::load_from_dir(entry.path(), &docker).await
                     } else {
                         continue
                     }
@@ -99,7 +102,7 @@ impl DockerService {
             match container {
                 Ok(c) => {
                     let name = c.container_name().to_owned();
-                    if let Some(_) = containers.insert(name.clone(), c) {
+                    if containers.insert(name.clone(), c).is_some() {
                         return Err(DockerServiceInitError::DuplicateConfiguration(name))
                     }
                 }
@@ -115,9 +118,8 @@ impl DockerService {
             containers,
         })
     }
-    
-    /// Load a container's configuration from the given directory
-    async fn load_container_config(path: PathBuf) -> Result<ManagedContainer, BollardError> {
+
+    pub async fn run(self: Arc<Self>, cancel: CancellationToken) {
 
     }
     
