@@ -12,3 +12,13 @@ pub struct ConnectionSettings {
 pub struct ApplicationSettings {
     pub conn: ConnectionSettings
 }
+
+impl Default for ApplicationSettings {
+    fn default() -> Self {
+        Self {
+            conn: ConnectionSettings {
+                server_uri: Uri::default()
+            }
+        }
+    }
+}
