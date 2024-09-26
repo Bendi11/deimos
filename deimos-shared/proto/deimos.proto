@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package deimos;
+
+message ServerStatusRequest {
+
+}
+
+message ServerStatusMessage {
+    string status = 1;
+}
+
+service Deimos {
+    rpc GetStatus(ServerStatusRequest) returns(ServerStatusMessage);
+}

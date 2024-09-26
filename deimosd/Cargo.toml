@@ -6,7 +6,7 @@ edition = "2021"
 license = "none"
 
 [dependencies]
-deimos-shared = { path = "../deimos-shared" }
+deimos-shared = { path = "../deimos-shared", features = ["server"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "macros", "signal"] }
 tokio-util = "0.7"
 thiserror = "1.0"
@@ -21,10 +21,6 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 toml = "0.8"
 dashmap = "6.1"
-
-chacha20poly1305 = { workspace = true }
-pem = { workspace = true }
-
 
 [package.metadata.deb]
 maintainer-scripts = "debian"

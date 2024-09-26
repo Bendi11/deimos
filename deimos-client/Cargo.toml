@@ -4,9 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-deimos-shared = { path = "../deimos-shared" }
-chacha20poly1305 = { workspace = true }
+deimos-shared = { path = "../deimos-shared", features = ["channel"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
+
+tonic = { workspace = true, features = ["channel"] }
+http = "1.1"
+http-serde = "2.1"
+
+serde = { workspace = true }
+dirs = "5.0"
+
+tracing = { workspace = true }
 
 [dependencies.iced]
 version = "0.12"

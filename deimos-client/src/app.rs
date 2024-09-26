@@ -1,40 +1,51 @@
-use iced::{widget::{button, column, text}, Application, Command, Element};
+use std::{path::PathBuf, str::FromStr};
 
+use iced::{Application, Command, Element};
+use settings::ApplicationSettings;
+use tonic::transport::Channel;
+use deimos_shared::DeimosClient;
+
+mod settings;
 
 pub struct DeimosApplication {
-    status: Option<String>,
+    api: DeimosClient<Channel>,
+    settings: ApplicationSettings,
 }
 
 #[derive(Debug, Clone)]
 pub enum DeimosMessage {
-    RequestStatus,
-    StatusRecv(String),
+
+}
+
+
+impl DeimosApplication {
+    const CONFIG_DIR_NAME: &str = "deimos";
 }
 
 impl Application for DeimosApplication {
     type Message = DeimosMessage;
     type Executor = iced::executor::Default;
     type Theme = iced::Theme;
-    type Flags = ();
+    type Flags = ApplicationSettings;
 
     fn title(&self) -> String {
         "Deimos".to_owned()
     }
 
     fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
+        let channel = Channel::builder(flags.conn.server_uri);
+        let api = DeimosClient::new(channel);
+
         (
             Self {
-                status: None,
+                api
             },
             Command::none()
         )
     }
 
     fn view(&self) -> Element<Self::Message> {
-        column![
-            button(text(format!("{:?}", self.status)))
-                .on_press(DeimosMessage::RequestStatus)
-        ].into()
+        
     }
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
