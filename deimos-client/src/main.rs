@@ -7,8 +7,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, FmtSubsc
 
 mod app;
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     let filter = tracing_subscriber::filter::Targets::new()
         .with_target("deimos_client", LevelFilter::TRACE)
         .with_target("iced", LevelFilter::WARN)
