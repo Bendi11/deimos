@@ -3,17 +3,15 @@ use std::sync::{Arc, Weak};
 use container::CachedContainerInfo;
 use deimos_shared::DeimosClient;
 use iced::{
-    alignment::Horizontal,
-    widget::{
-        rule, scrollable, text::LineHeight, Button, Column, Container, Row, Rule, Scrollable, Text,
-    },
-    Alignment, Application, Command, Element, Length, Pixels,
+    alignment::Horizontal, widget::scrollable, Alignment, Application, Command, Length, Pixels
 };
 use settings::ApplicationSettings;
+use style::{Button, Column, Element, Row, Rule, Scrollable, Text, Theme};
 use tonic::transport::Channel;
 
 pub mod container;
 pub mod settings;
+pub mod style;
 
 pub struct DeimosApplication {
     api: DeimosClient<Channel>,
@@ -53,7 +51,6 @@ impl DeimosApplication {
                 .width(Length::Fill)
                 .horizontal_alignment(Horizontal::Center)
                 .into(),
-            Rule::horizontal(Pixels(3f32)).into(),
             Scrollable::new(container_list)
                 .direction(scrollable::Direction::Vertical(
                     scrollable::Properties::new().width(Pixels(6f32)),
@@ -68,7 +65,7 @@ impl DeimosApplication {
 impl Application for DeimosApplication {
     type Message = DeimosMessage;
     type Executor = iced::executor::Default;
-    type Theme = iced::Theme;
+    type Theme = Theme;
     type Flags = ApplicationSettings;
 
     fn title(&self) -> String {
@@ -94,7 +91,7 @@ impl Application for DeimosApplication {
 
     fn view(&self) -> Element<Self::Message> {
         Row::with_children([
-            self.containerlist().into(),
+            self.containerlist(),
             Rule::vertical(Pixels(3f32)).into(),
             Column::with_children([
                 Row::with_children([Text::new("Connecting...")
@@ -103,7 +100,7 @@ impl Application for DeimosApplication {
                 .into(),
                 Rule::horizontal(Pixels(3f32)).into(),
             ])
-            .width(Length::FillPortion(4))
+            .width(Length::FillPortion(3))
             .into(),
         ])
         .into()
@@ -121,6 +118,6 @@ impl Application for DeimosApplication {
     }
 
     fn theme(&self) -> Self::Theme {
-        Self::Theme::Dark
+        Theme::default()
     }
 }
