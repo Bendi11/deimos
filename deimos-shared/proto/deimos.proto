@@ -23,9 +23,7 @@ message ContainerBriefRequest {
 }
 
 message ContainerBriefResponse {
-    oneof {
-        repeated ContainerBrief containers = 1;
-    }
+    repeated ContainerBrief containers = 1;
 }
 
 service Deimos {

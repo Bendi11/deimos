@@ -16,6 +16,7 @@ serde_json = "1.0"
 dirs = "5.0"
 
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 
 [dependencies.iced]

@@ -9,6 +9,7 @@ pub struct ConnectionSettings {
 }
 
 /// Global settings configuring server connection and UI styling
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ApplicationSettings {
     pub conn: ConnectionSettings
 }

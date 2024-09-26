@@ -1,5 +1,6 @@
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
+use container::CachedContainerInfo;
 use deimos_shared::DeimosClient;
 use iced::{
     alignment::Horizontal,
@@ -8,7 +9,6 @@ use iced::{
     },
     Alignment, Application, Command, Element, Length, Pixels,
 };
-use server::CachedContainerInfo;
 use settings::ApplicationSettings;
 use tonic::transport::Channel;
 
@@ -22,7 +22,7 @@ pub struct DeimosApplication {
     settings: ApplicationSettings,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone,)]
 pub enum DeimosView {
     Empty,
     Settings,
@@ -60,6 +60,7 @@ impl DeimosApplication {
                 ))
                 .into(),
         ])
+        .width(Length::FillPortion(1))
         .into()
     }
 }
@@ -93,11 +94,13 @@ impl Application for DeimosApplication {
 
     fn view(&self) -> Element<Self::Message> {
         Row::with_children([
-            self.containerlist().width(Length::FillPortion(1)).into(),
+            self.containerlist().into(),
             Rule::vertical(Pixels(3f32)).into(),
             Column::with_children([
-                Row::with_children([Text::new("Connecting...").horizontal_alignment(Horizontal::Right).into()])
-                    .into(),
+                Row::with_children([Text::new("Connecting...")
+                    .horizontal_alignment(Horizontal::Right)
+                    .into()])
+                .into(),
                 Rule::horizontal(Pixels(3f32)).into(),
             ])
             .width(Length::FillPortion(4))
