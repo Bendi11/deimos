@@ -2,15 +2,25 @@ use iced::{border::Radius, widget::rule::{self, FillMode}};
 
 use super::Theme;
 
-impl rule::StyleSheet for Theme {
-    type Style = ();
+pub enum RuleClass {
+    WhiteLine,
+}
 
-    fn appearance(&self, _: &Self::Style) -> rule::Appearance {
-        rule::Appearance {
-            color: self.rule,
-            width: 1,
-            radius: Radius::from([0f32, 0f32, 0f32, 0f32]),
-            fill_mode: FillMode::Full
+impl rule::Catalog for Theme {
+    type Class<'a> = RuleClass;
+
+    fn default<'a>() -> Self::Class<'a> {
+        RuleClass::WhiteLine
+    }
+
+    fn style(&self, class: &Self::Class<'_>) -> rule::Style {
+        match class {
+            RuleClass::WhiteLine => rule::Style {
+                color: self.rule,
+                width: 1,
+                radius: Radius::from(0f32),
+                fill_mode: FillMode::Full
+            }
         }
     }
 }

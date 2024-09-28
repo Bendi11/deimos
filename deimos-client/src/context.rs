@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Weak}, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use container::CachedContainerInfo;
 use deimos_shared::DeimosClient;
