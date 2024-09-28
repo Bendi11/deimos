@@ -1,12 +1,16 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
-use tokio::net::TcpListener;
+use deimos_shared::{Deimos, DeimosServer, QueryContainersRequest, QueryContainersResponse};
 use tokio_util::sync::CancellationToken;
+use async_trait::async_trait;
+use tonic::transport::Server;
 
 use super::docker::DockerService;
 
+
 /// A connection to a remote client, with references to state required to serve RPC requests
 pub struct ApiService {
+    config: ApiConfig,
     docker: Arc<DockerService>,
 }
 
@@ -24,10 +28,31 @@ impl ApiService {
     /// Load the Deimos API service configuration and store a handle to the local Docker instance
     /// to manage containers
     pub async fn new(config: ApiConfig, docker: Arc<DockerService>) -> Result<Self, ApiInitError> {
-        Ok(Self { docker })
+        Ok(
+            Self {
+                config,
+                docker,
+            }
+        )
     }
 
-    pub async fn run(self: Arc<Self>, cancel: CancellationToken) {}
+    pub async fn run(self: Arc<Self>, cancel: CancellationToken) {
+        if let Err(e) = Server::builder()
+            .add_service(
+                DeimosServer::from_arc(self.clone())
+            )
+            .serve_with_shutdown(self.config.bind, cancel.cancelled())
+            .await {
+            tracing::error!("Failed to run API server: {e}");
+        }
+    }
+}
+
+#[async_trait]
+impl Deimos for ApiService {
+    async fn query_containers(self: Arc<Self>, _request: tonic::Request<QueryContainersRequest>) -> Result<tonic::Response<QueryContainersResponse>, tonic::Status> {
+        Err(tonic::Status::unimplemented("Not yet finished"))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

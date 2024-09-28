@@ -7,10 +7,12 @@ license = "none"
 
 [dependencies]
 deimos-shared = { path = "../deimos-shared", features = ["server"] }
+tonic = { workspace = true, features = ["server"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "macros", "signal"] }
 tokio-util = "0.7"
 thiserror = "1.0"
 futures = "0.3"
+async-trait = "0.1"
 
 igd-next = { version = "0.15", features = ["aio_tokio"] }
 

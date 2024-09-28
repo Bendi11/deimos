@@ -1,11 +1,12 @@
 use std::{path::{Path, PathBuf}, process::ExitCode};
 
-use app::settings::ApplicationSettings;
+use app::DeimosApplicationState;
 use iced::{Application, Settings};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, FmtSubscriber};
 
-mod app;
+pub mod app;
+pub mod context;
 
 fn main() -> ExitCode {
     let filter = tracing_subscriber::filter::Targets::new()
@@ -38,7 +39,7 @@ fn main() -> ExitCode {
 
     let config_path = config_dir.join(app::DeimosApplication::CONFIG_FILE_NAME);
     let config = match std::fs::File::open(&config_path) {
-        Ok(rdr) => match serde_json::from_reader::<_, ApplicationSettings>(rdr) {
+        Ok(rdr) => match serde_json::from_reader::<_, DeimosApplicationState>(rdr) {
             Ok(cfg) => cfg,
             Err(e) => {
                 tracing::error!("Failed to parse configuration file {}: {}", config_path.display(), e);
@@ -54,7 +55,7 @@ fn main() -> ExitCode {
                 }
             }
 
-            let config = ApplicationSettings::default();
+            let config = DeimosApplicationState::default();
             
             let file = match std::fs::File::create(&config_path) {
                 Ok(f) => f,

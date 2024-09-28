@@ -17,6 +17,7 @@ fn main() {
 
     if let Err(e) = tonic_build::configure()
         .emit_rerun_if_changed(true)
+        .use_arc_self(true)
         .server_mod_attribute("deimos", "#[cfg(feature=\"server\")]")
         .client_mod_attribute("deimos", "#[cfg(feature=\"channel\")]")
         .compile_protos(

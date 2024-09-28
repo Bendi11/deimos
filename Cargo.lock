@@ -843,6 +843,7 @@ dependencies = [
 name = "deimosd"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bollard",
  "dashmap",
  "deimos-shared",
@@ -853,6 +854,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
+ "tonic",
  "tracing",
  "tracing-subscriber",
 ]

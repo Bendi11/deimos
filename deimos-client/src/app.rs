@@ -1,26 +1,25 @@
 use std::sync::{Arc, Weak};
 
-use container::CachedContainerInfo;
-use deimos_shared::DeimosClient;
-use iced::{
-    alignment::Horizontal, widget::scrollable, Alignment, Application, Command, Length, Pixels
-};
-use settings::ApplicationSettings;
+use iced::{alignment::Horizontal, widget::scrollable, Application, Command, Length, Pixels};
 use style::{Button, Column, Element, Row, Rule, Scrollable, Text, Theme};
-use tonic::transport::Channel;
 
-pub mod container;
-pub mod settings;
+use crate::context::{container::CachedContainerInfo, Context, ContextState};
+
 pub mod style;
 
 pub struct DeimosApplication {
-    api: DeimosClient<Channel>,
+    state: DeimosApplicationState,
+    ctx: Arc<Context>,
     view: DeimosView,
-    containers: Vec<Arc<CachedContainerInfo>>,
-    settings: ApplicationSettings,
 }
 
-#[derive(Debug, Clone,)]
+/// Persistent state maintained for the whole application
+#[derive(Default, serde::Deserialize, serde::Serialize)]
+pub struct DeimosApplicationState {
+    pub context: ContextState,
+}
+
+#[derive(Debug, Clone)]
 pub enum DeimosView {
     Empty,
     Settings,
@@ -38,8 +37,8 @@ impl DeimosApplication {
 
     /// Get a list overview of all containers informed from the server
     fn containerlist(&self) -> Element<DeimosMessage> {
-        let containers = self.containers.iter().map(|c| {
-            Button::new(Text::new(&c.name))
+        let containers = self.ctx.containers().map(|c| {
+            Button::new(Text::new(c.name.clone()))
                 .height(Length::FillPortion(1))
                 .into()
         });
@@ -60,33 +59,25 @@ impl DeimosApplication {
         .width(Length::FillPortion(1))
         .into()
     }
+
+    pub async fn refresh_cache(&self) {}
 }
 
 impl Application for DeimosApplication {
     type Message = DeimosMessage;
     type Executor = iced::executor::Default;
     type Theme = Theme;
-    type Flags = ApplicationSettings;
+    type Flags = DeimosApplicationState;
 
     fn title(&self) -> String {
         "Deimos".to_owned()
     }
 
-    fn new(settings: Self::Flags) -> (Self, Command<Self::Message>) {
-        let channel = Channel::builder(settings.conn.server_uri.clone()).connect_lazy();
-        let api = DeimosClient::new(channel);
-
+    fn new(state: Self::Flags) -> (Self, Command<Self::Message>) {
+        let ctx = Arc::new(Context::new(&state.context));
         let view = DeimosView::Empty;
 
-        (
-            Self {
-                api,
-                settings,
-                view,
-                containers: Vec::new(),
-            },
-            Command::none(),
-        )
+        (Self { ctx, state, view }, Command::none())
     }
 
     fn view(&self) -> Element<Self::Message> {
