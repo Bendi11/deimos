@@ -3,6 +3,7 @@ use iced::widget::{image, Image};
 
 
 /// Data received from a server about a single container, cached locally
+#[derive(Debug)]
 pub struct CachedContainerInfo {
     pub id: String,
     pub name: String,

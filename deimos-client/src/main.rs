@@ -1,7 +1,5 @@
-use std::{path::{Path, PathBuf}, process::ExitCode};
+use std::process::ExitCode;
 
-use app::DeimosApplicationState;
-use iced::{Application, Settings};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, FmtSubscriber};
 

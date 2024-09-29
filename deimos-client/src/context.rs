@@ -8,13 +8,15 @@ use tonic::transport::Channel;
 pub mod container;
 
 /// Context shared across the application used to perform API requests on the remote
+#[derive(Debug)]
 pub struct Context {
+    state: ContextState,
     api: DeimosClient<Channel>,
     containers: Vec<Arc<CachedContainerInfo>>,
 }
 
 /// Persistent state kept for the [Context]'s connection
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextState {
     #[serde(with="http_serde::uri")]
     pub server_uri: Uri,
@@ -25,7 +27,7 @@ pub struct ContextState {
 impl Context {
     /// Create a new lazy API client, which will not attempt a connection until the first API call
     /// is made
-    pub fn new(state: &ContextState) -> Self {
+    pub async fn new(state: ContextState) -> Self {
         let api = DeimosClient::new(
             Channel::builder(state.server_uri.clone())
                 .connect_timeout(state.connect_timeout)
@@ -36,6 +38,7 @@ impl Context {
         let containers = Vec::new();
 
         Self {
+            state,
             api,
             containers,
         }
