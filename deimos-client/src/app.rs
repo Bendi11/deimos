@@ -1,10 +1,10 @@
 use std::{process::ExitCode, sync::{Arc, Weak}};
 
 use config::LoadStateError;
-use iced::{Length, Pixels, Task};
+use iced::{alignment::Horizontal, widget::container, Length, Pixels, Task};
 use loader::{LoaderMessage, LoadWrapper};
-use settings::Settings;
-use style::{Container, Element, Row, Rule, Text, Theme};
+use settings::{Settings, SettingsMessage};
+use style::{Column, Container, Element, Row, Rule, Text, Theme};
 
 use crate::context::{container::CachedContainerInfo, Context, ContextState};
 
@@ -34,8 +34,11 @@ pub enum DeimosView {
     Server(Weak<CachedContainerInfo>),
 }
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug)]
 pub enum DeimosMessage {
+    Navigate(DeimosView),
+    Settings(SettingsMessage),
 }
 
 impl DeimosApplication {
@@ -46,7 +49,6 @@ impl DeimosApplication {
 impl DeimosApplication {
     /// Load application state from a save file and return the application
     async fn load() -> Result<Self, DeimosApplicationLoadError>  {
-        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         let state = Self::load_config()?;
         let ctx = Arc::new(Context::new(state.context).await);
 
@@ -89,6 +91,11 @@ impl DeimosApplication {
 
     fn update(&mut self, msg: DeimosMessage) -> Task<DeimosMessage> {
         match msg {
+            DeimosMessage::Navigate(view) => {
+                self.view = view;
+                iced::Task::none()
+            },
+            DeimosMessage::Settings(msg) => self.settings.update(msg).map(DeimosMessage::Settings),
         }
     }
 
@@ -99,9 +106,21 @@ impl DeimosApplication {
                 Rule::vertical(Pixels(3f32))
             )
             .push(
-                Text::new("Main view")
-                    .width(Length::FillPortion(3))
-                    .height(Length::Fill)
+                Column::new()
+                    .push(
+                        Container::new(
+                            self.settings.icon()
+                                .map(DeimosMessage::Navigate)
+                        )
+                            .align_x(Horizontal::Right)
+                            .height(Length::FillPortion(1))
+                            .class(<Theme as container::Catalog>::Class::Invisible)
+                    )
+                    .push(
+                        Text::new("Main view")
+                            .width(Length::FillPortion(3))
+                            .height(Length::FillPortion(12))
+                    )
             )
             .into()
     }

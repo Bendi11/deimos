@@ -9,6 +9,7 @@ mod rule;
 mod scrollable;
 mod button;
 mod container;
+mod svg;
 
 pub struct Theme {
     pub bg_dark: Color,
@@ -57,3 +58,4 @@ pub type Rule<'a> = iced::widget::Rule<'a, Theme>;
 pub type Container<'a, T> = iced::widget::Container<'a, T, Theme, iced::Renderer>;
 pub type Scrollable<'a, T> = iced::widget::Scrollable<'a, T, Theme, iced::Renderer>;
 pub type Button<'a, T> = iced::widget::Button<'a, T, Theme, iced::Renderer>;
+pub type Svg<'a> = iced::widget::Svg<'a, Theme>;
