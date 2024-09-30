@@ -1,9 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use container::CachedContainerInfo;
-use deimos_shared::DeimosClient;
+use deimos_shared::{DeimosClient, QueryContainersRequest};
 use http::Uri;
-use tonic::transport::Channel;
+use tokio::sync::{RwLock, RwLockReadGuard};
+use tonic::{transport::Channel, Code, Status};
 
 pub mod container;
 
@@ -11,7 +12,7 @@ pub mod container;
 #[derive(Debug)]
 pub struct Context {
     state: ContextState,
-    api: DeimosClient<Channel>,
+    api: RwLock<DeimosClient<Channel>>,
     containers: Vec<Arc<CachedContainerInfo>>,
 }
 
@@ -28,11 +29,13 @@ impl Context {
     /// Create a new lazy API client, which will not attempt a connection until the first API call
     /// is made
     pub async fn new(state: ContextState) -> Self {
-        let api = DeimosClient::new(
-            Channel::builder(state.server_uri.clone())
-                .connect_timeout(state.connect_timeout)
-                .timeout(state.request_timeout)
-                .connect_lazy()
+        let api = RwLock::new(
+            DeimosClient::new(
+                Channel::builder(state.server_uri.clone())
+                    .connect_timeout(state.connect_timeout)
+                    .timeout(state.request_timeout)
+                    .connect_lazy()
+            )
         );
 
         let containers = Vec::new();
@@ -50,6 +53,12 @@ impl Context {
             .containers
             .iter()
             .cloned()
+    }
+
+        
+    /// Get a reference to the client used to issue API requests to the server
+    pub async fn api(&self) -> RwLockReadGuard<'_, DeimosClient<Channel>> {
+        self.api.read().await
     }
 }
 

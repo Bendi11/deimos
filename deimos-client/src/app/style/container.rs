@@ -4,6 +4,7 @@ use super::Theme;
 
 pub enum ContainerClass {
     RoundedBorder,
+    Invisible,
 }
 
 impl container::Catalog for Theme {
@@ -28,6 +29,12 @@ impl container::Catalog for Theme {
                     offset: Vector::new(0f32, 2f32),
                     blur_radius: 2f32,
                 }
+            },
+            ContainerClass::Invisible => container::Style {
+                text_color: None,
+                background: None,
+                border: Border::default(),
+                shadow: Shadow::default()
             }
         }
     }

@@ -1,15 +1,23 @@
 use std::{process::ExitCode, sync::{Arc, Weak}};
 
-use iced::{widget::Text, Task};
-use style::{Element, Theme};
+use config::LoadStateError;
+use iced::{Length, Pixels, Task};
+use loader::{LoaderMessage, LoadWrapper};
+use settings::Settings;
+use style::{Container, Element, Row, Rule, Text, Theme};
 
 use crate::context::{container::CachedContainerInfo, Context, ContextState};
 
+mod loader;
 mod config;
+mod sidebar;
+mod settings;
 pub mod style;
 
+#[derive(Debug)]
 pub struct DeimosApplication {
-    ctx: Option<Arc<Context>>,
+    ctx: Arc<Context>,
+    settings: Settings,
     view: DeimosView,
 }
 
@@ -28,7 +36,6 @@ pub enum DeimosView {
 
 #[derive(Debug, Clone)]
 pub enum DeimosMessage {
-    ApplicationInit(Arc<Context>),
 }
 
 impl DeimosApplication {
@@ -37,31 +44,38 @@ impl DeimosApplication {
 }
 
 impl DeimosApplication {
-    pub fn run() -> ExitCode {
-         let state = match Self::load_config() {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("{e}");
-                return ExitCode::FAILURE
-            }
-        };
+    /// Load application state from a save file and return the application
+    async fn load() -> Result<Self, DeimosApplicationLoadError>  {
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        let state = Self::load_config()?;
+        let ctx = Arc::new(Context::new(state.context).await);
 
+        let settings = Settings::new(ctx.clone());
+        let view = DeimosView::Empty;
+
+        Ok(
+            Self {
+                ctx,
+                settings,
+                view,
+            }
+        )
+    }
+
+    pub fn run() -> ExitCode {
         match iced::application(
                 "Deimos",
-                Self::update,
-                Self::view
+                LoadWrapper::update,
+                LoadWrapper::view
             )
             .executor::<iced::executor::Default>()
             .theme(|_| Theme::default())
             .run_with(move ||
                 (
-                    Self {
-                        ctx: None,
-                        view: DeimosView::Empty
-                    },
+                    LoadWrapper::new(),
                     Task::perform(
-                        async { Context::new(state.context).await },
-                        |ctx| DeimosMessage::ApplicationInit(Arc::new(ctx)),
+                        Self::load(),
+                        LoaderMessage::Loaded,
                     )
                 )
             ) {
@@ -75,15 +89,26 @@ impl DeimosApplication {
 
     fn update(&mut self, msg: DeimosMessage) -> Task<DeimosMessage> {
         match msg {
-            DeimosMessage::ApplicationInit(ctx) => {
-                self.ctx = Some(ctx);
-                Task::none()
-            }
         }
     }
 
     fn view(&self) -> Element<DeimosMessage> {
-        Text::new("Test")
+        Row::new()
+            .push(self.sidebar())
+            .push(
+                Rule::vertical(Pixels(3f32))
+            )
+            .push(
+                Text::new("Main view")
+                    .width(Length::FillPortion(3))
+                    .height(Length::Fill)
+            )
             .into()
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeimosApplicationLoadError {
+    #[error("Failed to load application state: {0}")]
+    LoadState(#[from] LoadStateError),
 }

@@ -1,4 +1,4 @@
-use std::{path::{Path, PathBuf}, process::ExitCode};
+use std::path::{Path, PathBuf};
 
 use super::{DeimosApplication, DeimosApplicationState};
 
@@ -40,7 +40,7 @@ impl DeimosApplication {
 
                 Ok(config)
             },
-            Err(e) => return Err(
+            Err(e) => Err(
                 LoadStateError {
                     config_path,
                     kind: LoadStateErrorKind::FailedToOpen(e)
