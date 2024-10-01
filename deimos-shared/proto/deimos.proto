@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "status.proto";
+
 package deimos;
 
 
@@ -29,4 +31,8 @@ message QueryContainersResponse {
 service Deimos {
     // List brief descriptions of all containers managed by the server
     rpc QueryContainers(QueryContainersRequest) returns(QueryContainersResponse);
+
+    rpc ContainerStatus(ContainerStatusRequest) returns(ContainerStatusResponse);
+
+    rpc ContainerStatusStream() returns(stream ContainerStatusStream);
 }

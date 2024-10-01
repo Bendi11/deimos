@@ -22,7 +22,7 @@ chrono = { workspace = true }
 
 [dependencies.iced]
 version = "0.13"
-features = ["tokio", "image", "svg"]
+features = ["tokio", "image", "svg", "debug"]
 
 [dependencies.iced_aw]
 version = "0.11"

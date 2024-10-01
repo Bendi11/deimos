@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package deimos;
+
+message ContainerStatusRequest {
+    string container_id = 1;
+}
+
+message ContainerStatusResponse {
+    bool online = 1;
+}
+
+message ContainerStatusNotification {
+    string container_id = 1;
+    ContainerStatusResponse status = 2;
+}

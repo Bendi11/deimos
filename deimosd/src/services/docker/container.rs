@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use bollard::Docker;
+use bollard::{container::RemoveContainerOptions, secret::ContainerState, Docker};
 use tokio::sync::Mutex;
 
 /// Configuration for a managed Docker container
@@ -82,7 +82,7 @@ pub struct ManagedContainer {
 /// State populated after a Docker container is created for a [ManagedContainer]
 pub struct ManagedContainerState {
     /// ID of the container running for this
-    pub docker_id: String,
+    pub docker_id: Arc<str>,
 }
 
 impl ManagedContainer {
@@ -187,7 +187,7 @@ impl ManagedContainer {
     
     /// Create a Docker container instance from the configuration given and rename it to match the
     /// name given in the config
-    pub async fn create(&self, docker: &Docker) -> Result<(), ManagedContainerStartError> {
+    pub async fn create(&self, docker: Docker) -> Result<(), ManagedContainerError> {
         let config = self.docker_config();
 
         let response = docker
@@ -215,11 +215,39 @@ impl ManagedContainer {
         let mut state = self.state.lock().await;
         *state = Some(
             ManagedContainerState {
-                docker_id: response.id
+                docker_id: Arc::from(response.id)
             }
         );
 
         Ok(())
+    }
+    
+    /// Stop and remove the Docker container for this managed container
+    pub async fn destroy(self: Arc<Self>, docker: Docker) -> Result<(), ManagedContainerError> {
+        let Some(ref state) = *self.state.lock().await else { return Ok(()) };
+        docker.stop_container(&state.docker_id, None).await?;
+        docker.remove_container(
+            &state.docker_id,
+            Some(RemoveContainerOptions {
+                force: false,
+                ..Default::default()
+            })
+        ).await?;
+
+        tracing::info!("Stopped and removed container {} for {}", state.docker_id, self.container_name());
+
+        Ok(())
+    }
+    
+    /// Get the ID of the Docker container that has been created for this managed container, or
+    /// `None` if no container exists
+    pub async fn container_id(&self) -> Option<Arc<str>> {
+        self
+            .state
+            .lock()
+            .await
+            .as_ref()
+            .map(|s| s.docker_id.clone())
     }
 
     /// Get the name of the Docker container when run
@@ -239,7 +267,7 @@ impl ManagedContainerDockerPortProtocol {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ManagedContainerStartError {
+pub enum ManagedContainerError {
     #[error("Docker API error: {0}")]
     Bollard(#[from] bollard::errors::Error),
 }

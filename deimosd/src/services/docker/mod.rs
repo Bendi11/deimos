@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use bollard::{container::{RemoveContainerOptions, StopContainerOptions}, Docker};
-use container::ManagedContainer;
+use container::{ManagedContainer, ManagedContainerError};
 use dashmap::DashMap;
 use tokio_util::sync::CancellationToken;
 
@@ -155,13 +155,8 @@ impl DockerService {
     }
     
     /// Create a container from the configuration loaded for the given managed container
-    pub async fn create_container(&self, name: Arc<str>) -> Result<(), DockerCreateContainerError> {
-        let container = self
-            .containers
-            .get(name.as_ref())
-            .ok_or_else(|| DockerCreateContainerError::NoSuchContainer(String::from(name.as_ref())))?;
-
-        container.create(&self.docker).await.map_err(Into::into)
+    pub async fn create_container(&self, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
+        managed.create(self.docker.clone()).await.map_err(Into::into)
     }
     
     /// Run all necessary tasks for the Docker container manager, cancel-safe with the given
@@ -177,58 +172,16 @@ impl DockerService {
     }
 
     async fn run_internal(self: Arc<Self>) {
-        if let Err(e) = self.create_container(Arc::from("arma3")).await {
-            tracing::error!("Failed to create container: {e}");
-        }
-
-        tokio::time::sleep(Duration::from_secs(30)).await;
-
-        self.stop_all().await;
-    }
     
+    }
+
     /// Attempt to stop all running containers, e.g. for graceful server shutdown
     pub async fn stop_all(self: Arc<Self>) {
         let containers = self.containers.iter().map(|entry| entry.value().clone()).collect::<Vec<_>>();
         let tasks = containers
             .into_iter()
             .map(
-                |container| {
-                    let docker = self.docker.clone();
-                    tokio::task::spawn(async move {
-                        let state = container.state.lock().await;
-                        if let Some(state) = state.as_ref() {
-                            if let Err(e) = docker.stop_container(&state.docker_id, None).await {
-                                tracing::error!(
-                                    "Failed to stop container {} for {}: {}",
-                                    state.docker_id,
-                                    container.container_name(),
-                                    e
-                                );
-
-                                return
-                            }
-
-                            if let Err(e) = docker.remove_container(
-                                &state.docker_id,
-                                Some(RemoveContainerOptions {
-                                    force: false,
-                                    ..Default::default()
-                                })
-                            ).await {
-                                tracing::error!(
-                                    "Failed to remove container {} for {}: {}",
-                                    state.docker_id,
-                                    container.container_name(),
-                                    e
-                                );
-
-                                return
-                            }
-
-                            tracing::info!("Stopped and removed container {} for {}", state.docker_id, container.container_name());
-                        }
-                    })
-                }
+                |container| tokio::task::spawn(container.destroy(self.docker.clone()))
             );
 
         for future in tasks {
@@ -242,14 +195,6 @@ impl DockerService {
     pub fn client(&self) -> &Docker {
         &self.docker
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DockerCreateContainerError {
-    #[error("No such container '{0}'")]
-    NoSuchContainer(String),
-    #[error("{0}")]
-    Other(#[from] container::ManagedContainerStartError),
 }
 
 #[derive(Debug, thiserror::Error)]

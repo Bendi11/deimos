@@ -22,7 +22,7 @@ impl container::Catalog for Theme {
                 border: Border {
                     color: self.rule,
                     width: 2f32,
-                    radius: Radius::from(1f32),
+                    radius: Radius::from(5f32),
                 },
                 shadow: Shadow {
                     color: iced::Color::BLACK,

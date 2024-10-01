@@ -1,7 +1,7 @@
 use std::{process::ExitCode, sync::{Arc, Weak}};
 
 use config::LoadStateError;
-use iced::{alignment::Horizontal, widget::container, Length, Pixels, Task};
+use iced::{alignment::Horizontal, widget::{container, svg, Space, Svg}, Length, Padding, Pixels, Size, Task};
 use loader::{LoaderMessage, LoadWrapper};
 use settings::{Settings, SettingsMessage};
 use style::{Column, Container, Element, Row, Rule, Text, Theme};
@@ -10,13 +10,13 @@ use crate::context::{container::CachedContainerInfo, Context, ContextState};
 
 mod loader;
 mod config;
-mod sidebar;
 mod settings;
 pub mod style;
 
 #[derive(Debug)]
 pub struct DeimosApplication {
     ctx: Arc<Context>,
+    icon: svg::Handle,
     settings: Settings,
     view: DeimosView,
 }
@@ -54,10 +54,13 @@ impl DeimosApplication {
 
         let settings = Settings::new(ctx.clone());
         let view = DeimosView::Empty;
+        
+        let icon = svg::Handle::from_memory(include_bytes!("../assets/mars-deimos.svg"));
 
         Ok(
             Self {
                 ctx,
+                icon,
                 settings,
                 view,
             }
@@ -101,7 +104,23 @@ impl DeimosApplication {
 
     fn view(&self) -> Element<DeimosMessage> {
         Row::new()
-            .push(self.sidebar())
+            .push(
+                Column::new()
+                    .push(
+                        Row::new()
+                            .push(Space::new(50f32, 0f32))
+                            .push(Svg::new(self.icon.clone())
+                                .class(style::orbit::MARS[1])
+                                .width(Length::Shrink)
+                            )
+                            .push(Text::new("Deimos")
+                                .size(32f32)
+                                .center()
+                            )
+                            .height(Length::Fixed(64f32))
+                    )
+                    .push(Rule::horizontal(Pixels(2f32)))
+            )
             .push(
                 Rule::vertical(Pixels(3f32))
             )
@@ -112,15 +131,14 @@ impl DeimosApplication {
                             self.settings.icon()
                                 .map(DeimosMessage::Navigate)
                         )
-                            .align_x(Horizontal::Right)
-                            .height(Length::FillPortion(1))
                             .class(<Theme as container::Catalog>::Class::Invisible)
+                            .align_right(Length::Fill)
+                            .height(Length::Fixed(45f32))
                     )
                     .push(
                         Text::new("Main view")
-                            .width(Length::FillPortion(3))
-                            .height(Length::FillPortion(12))
                     )
+                    .width(Length::FillPortion(3))
             )
             .into()
     }

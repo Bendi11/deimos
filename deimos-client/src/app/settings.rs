@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use iced::{widget::{svg, Text}, Task};
+use iced::{widget::{svg, Text}, Length, Task};
 
 use crate::context::Context;
 
@@ -32,6 +32,7 @@ impl Settings {
         Button::new(
             Svg::new(self.icon.clone())
                 .class((super::style::orbit::MERCURY[1], super::style::orbit::SOL[0]))
+                .width(Length::Shrink)
         )
             .on_press(DeimosView::Settings)
             .into()
