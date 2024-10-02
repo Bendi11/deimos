@@ -10,6 +10,8 @@ message ContainerStatusResponse {
     bool online = 1;
 }
 
+message ContainerStatusStreamRequest {}
+
 message ContainerStatusNotification {
     string container_id = 1;
     ContainerStatusResponse status = 2;

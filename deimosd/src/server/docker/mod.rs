@@ -8,11 +8,11 @@ use tokio_util::sync::CancellationToken;
 pub mod container;
 
 /// Service managing the creation and removal of Docker containers
-pub struct DockerService {
+pub struct DockerState {
     pub config: DockerConfig,
-    docker: Docker,
+    pub docker: Docker,
     /// Map of container names to their state
-    containers: DashMap<String, Arc<ManagedContainer>>,
+    pub containers: DashMap<String, Arc<ManagedContainer>>,
 }
 
 /// Configuration for the local Docker container management service
@@ -40,13 +40,13 @@ pub enum DockerConnectionType {
     Local,
 }
 
-impl DockerService {
+impl DockerState {
     /// Default timeout to use for Docker API when no alternative is specified in the config
     pub const DEFAULT_TIMEOUT_SECONDS: u64 = 30;
 
     /// Load the docker service from a config file specifying how to connect to the local Docker
     /// engine and where to load container configurations from
-    pub async fn new(config: DockerConfig) -> Result<Self, DockerServiceInitError> {
+    pub async fn new(config: DockerConfig) -> Result<Self, DockerInitError> {
         let docker = match config.conn {
             None => {
                 tracing::info!("No docker config given, using platform defaults to connect");
@@ -71,7 +71,7 @@ impl DockerService {
         
         let dir = config.containerdir.clone();
         let container_entries = std::fs::read_dir(&dir)
-            .map_err(|err| DockerServiceInitError::ContainersDirError { dir: dir.clone(), err })?;
+            .map_err(|err| DockerInitError::ContainersDirError { dir: dir.clone(), err })?;
 
         for entry in container_entries {
             let entry = match entry {
@@ -130,7 +130,7 @@ impl DockerService {
                 Ok(c) => {
                     let name = c.container_name().to_owned();
                     if containers.insert(name.clone(), Arc::new(c)).is_some() {
-                        return Err(DockerServiceInitError::DuplicateConfiguration(name));
+                        return Err(DockerInitError::DuplicateConfiguration(name));
                     }
                 }
                 Err(e) => {
@@ -198,7 +198,7 @@ impl DockerService {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum DockerServiceInitError {
+pub enum DockerInitError {
     #[error("Docker API error: {0}")]
     Bollard(#[from] bollard::errors::Error),
     #[error("Failed to load container configs from directory {dir}: {err}")]

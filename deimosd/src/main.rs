@@ -7,7 +7,6 @@ use serde::Deserialize;
 use server::{Deimos, DeimosConfig};
 
 mod server;
-mod services;
 
 const CONFIG_PATH: &str = "./deimos.toml";
 
@@ -45,10 +44,11 @@ async fn main() -> ExitCode {
         }
     };
 
-    if let Err(e) = Deimos::start(conf).await {
-        tracing::error!("{e}");
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
+    match Deimos::new(conf).await {
+        Ok(server) => server.run().await,
+        Err(e) => {
+            tracing::error!("{e}");
+            ExitCode::FAILURE
+        }
     }
 }

@@ -1,14 +1,17 @@
-use std::sync::Arc;
+use std::{process::ExitCode, sync::Arc};
 
-use crate::services::{
-    api::{ApiConfig, ApiInitError, ApiService},
-    docker::{DockerConfig, DockerService},
-};
+use api::{ApiConfig, ApiInitError};
+use docker::{DockerConfig, DockerState};
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
 
+mod docker;
+mod api;
+
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
-pub struct Deimos;
+pub struct Deimos {
+    docker: DockerState,
+}
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,28 +23,31 @@ pub struct DeimosConfig {
 impl Deimos {
     /// Create a new server instance, loading all required files from the configuration specified
     /// and creating a TCP listener for the control interface.
-    pub async fn start(config: DeimosConfig) -> Result<(), ServerInitError> {
-        let docker = Arc::new(
-            DockerService::new(config.docker)
-                .await
-                .map_err(ServerInitError::Docker)?,
-        );
-        let api = Arc::new(ApiService::new(config.api, docker.clone()).await?);
+    pub async fn new(config: DeimosConfig) -> Result<Arc<Self>, ServerInitError> {
+        let docker = DockerState::new(config.docker)
+            .await
+            .map_err(ServerInitError::Docker)?;
 
+        Ok(
+            Arc::new(Self {
+                docker,
+            })
+        )
+    }
+    
+    /// Run the server until an interrupt signal is received or a fatal error occurs
+    pub async fn run(self: Arc<Self>) -> ExitCode {
         let cancel = CancellationToken::new();
-
-        let tasks = async {
-            tokio::join! {
-                tokio::spawn(api.run(cancel.clone())),
-                tokio::spawn(docker.run(cancel.clone()))
-            }
-        };
 
         #[cfg(unix)]
         {
-            let mut close = tokio::signal::unix::signal(SignalKind::interrupt())
-                .map_err(ServerInitError::Signal)?;
-
+            let mut close = match tokio::signal::unix::signal(SignalKind::interrupt()) {
+                Ok(sig) => sig,
+                Err(e) => {
+                    tracing::error!("Failed to create SIGINT handler: {e}");
+                    return ExitCode::FAILURE
+                }
+            };
 
             if let Some(()) = close.recv().await {
                 tracing::info!("Got SIGINT, shutting down deimosd");
@@ -52,7 +58,7 @@ impl Deimos {
         #[cfg(not(unix))]
         tasks.await;
 
-        Ok(())
+        ExitCode::SUCCESS
     }
 }
 
@@ -60,8 +66,6 @@ impl Deimos {
 pub enum ServerInitError {
     #[error("Failed to initialize API server: {0}")]
     Api(#[from] ApiInitError),
-    #[error("Failed to create SIGTERM listener: {0}")]
-    Signal(std::io::Error),
     #[error("Failed to initialize Docker service: {0}")]
-    Docker(crate::services::docker::DockerServiceInitError),
+    Docker(docker::DockerInitError),
 }
