@@ -1,6 +1,6 @@
 use std::{process::ExitCode, sync::Arc};
 
-use api::{ApiConfig, ApiInitError};
+use api::{ApiConfig, ApiInitError, ApiState};
 use deimos_shared::ContainerStatusNotification;
 use docker::{DockerConfig, DockerState};
 use tokio::signal::unix::SignalKind;
@@ -12,6 +12,7 @@ mod api;
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
 pub struct Deimos {
     docker: DockerState,
+    api: ApiState,
     status: tokio::sync::broadcast::Sender<ContainerStatusNotification>
 }
 
@@ -30,11 +31,14 @@ impl Deimos {
             .await
             .map_err(ServerInitError::Docker)?;
 
+        let api = ApiState::new(config.api).await?;
+
         let (status, _) = tokio::sync::broadcast::channel(2);
 
         Ok(
             Arc::new(Self {
                 docker,
+                api,
                 status
             })
         )
@@ -43,6 +47,8 @@ impl Deimos {
     /// Run the server until an interrupt signal is received or a fatal error occurs
     pub async fn run(self: Arc<Self>) -> ExitCode {
         let cancel = CancellationToken::new();
+
+        let api_server = tokio::task::spawn(self.clone().serve_api(cancel.clone()));
 
         #[cfg(unix)]
         {
@@ -57,11 +63,12 @@ impl Deimos {
             if let Some(()) = close.recv().await {
                 tracing::info!("Got SIGINT, shutting down deimosd");
                 cancel.cancel();
-                let _ = tasks.await;
             } 
         }
-        #[cfg(not(unix))]
-        tasks.await;
+
+        let _ = tokio::join! {
+            api_server
+        };
 
         ExitCode::SUCCESS
     }

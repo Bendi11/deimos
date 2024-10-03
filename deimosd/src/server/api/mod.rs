@@ -1,9 +1,11 @@
 use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll};
 
-use deimos_shared::{ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, QueryContainersRequest, QueryContainersResponse};
+use deimos_shared::{ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use tokio::sync::{broadcast, Mutex};
 use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
+use tonic::transport::Server;
 
 use super::Deimos;
 
@@ -42,8 +44,13 @@ pub struct ContainerStatusStreamer {
 }
 
 impl Deimos {
-    pub async fn serve_api(self: Arc<Self>) {
-
+    pub async fn serve_api(self: Arc<Self>, cancel: CancellationToken) {
+        if let Err(e) = Server::builder()
+            .add_service(DeimosServiceServer::from_arc(self.clone()))
+            .serve_with_shutdown(self.api.config.bind, cancel.cancelled())
+            .await {
+            tracing::error!("Failed to run Deimos API server: {e}")
+        }
     }
 }
 
