@@ -1,12 +1,15 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::{SystemTime, SystemTimeError}};
 
-use bollard::{container::RemoveContainerOptions, secret::ContainerState, Docker};
-use tokio::sync::Mutex;
+use bollard::{container::RemoveContainerOptions, Docker};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use tokio::{io::AsyncReadExt, sync::Mutex};
 
 /// Configuration for a managed Docker container
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ManagedContainerConfig {
+    /// ID of the container, must remain constant over server renames
+    pub id: Arc<str>,
     /// Name that identifies this container
     pub name: Arc<str>,
     /// Banner image to be displayed in user interfaces
@@ -71,10 +74,12 @@ pub struct ManagedContainerDockerEnvConfig {
 /// A managed container that represents a running or stopped container
 pub struct ManagedContainer {
     /// Configuration provided in a directory for this container
-    pub(super) config: ManagedContainerConfig,
+    pub config: ManagedContainerConfig,
     /// Directory that the container's config file was loaded from, used to build relative paths
     /// specified in the config
     dir: PathBuf,
+    /// Date and time of the last modification made to the config file
+    pub last_modified: DateTime<Utc>,
     /// State of the container
     pub(super) state: Mutex<Option<ManagedContainerState>>,
 }
@@ -99,11 +104,37 @@ impl ManagedContainer {
             "Loading container from config file {}",
             config_path.display()
         );
-        let config_file = tokio::fs::read_to_string(&config_path)
+        
+
+
+        let mut config_file = tokio::fs::File::open(&config_path)
             .await
-            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path, err})?;
-        let config = toml::de::from_str::<ManagedContainerConfig>(&config_file)?;
+            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err})?;
+
+        let metadata = config_file
+            .metadata()
+            .await
+            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err })?;
+    
+        let mut config_str = String::with_capacity(config_file.metadata().await.map(|m| m.len()).unwrap_or(512) as usize);
+        config_file
+            .read_to_string(&mut config_str)
+            .await
+            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err })?;
+
+        let config = toml::de::from_str::<ManagedContainerConfig>(&config_str)?;
         tracing::trace!("Found docker container with container name {}", config.name);
+        
+        let last_modified = metadata
+            .modified()
+            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path, err })?;
+
+        let last_modified = last_modified
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(ManagedContainerLoadError::InvalidDateTime)?;
+
+        let last_modified = DateTime::from_timestamp(last_modified.as_secs() as i64, last_modified.subsec_nanos())
+            .expect("Last modified timestamp out of range?");
 
         let image_inspect = docker.inspect_image(&config.docker.image).await?;
         match image_inspect.id {
@@ -118,6 +149,7 @@ impl ManagedContainer {
                     Self {
                         dir,
                         config,
+                        last_modified,
                         state: Mutex::new(None),
                     }
                 )
@@ -279,6 +311,8 @@ pub enum ManagedContainerLoadError {
         path: PathBuf,
         err: std::io::Error,
     },
+    #[error("Config file had invalid modified datetime {}", .0)]
+    InvalidDateTime(std::time::SystemTimeError),
     #[error("Failed to parse config as TOML: {0}")]
     ConfigParse(#[from] toml::de::Error),
     #[error("Docker API error: {0}")]

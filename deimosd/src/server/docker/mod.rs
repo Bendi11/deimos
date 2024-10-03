@@ -1,6 +1,6 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc};
 
-use bollard::{container::{RemoveContainerOptions, StopContainerOptions}, Docker};
+use bollard::Docker;
 use container::{ManagedContainer, ManagedContainerError};
 use dashmap::DashMap;
 use tokio_util::sync::CancellationToken;

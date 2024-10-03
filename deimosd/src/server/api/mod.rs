@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
-use deimos_shared::{util, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
+use deimos_shared::{util, ContainerBrief, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use tokio::sync::{broadcast, Mutex};
 use async_trait::async_trait;
@@ -94,7 +94,22 @@ impl Deimos {
 #[async_trait]
 impl DeimosService for Deimos {
     async fn query_containers(self: Arc<Self>, _request: tonic::Request<QueryContainersRequest>) -> Result<tonic::Response<QueryContainersResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("Not yet finished"))
+        let containers = self
+            .docker
+            .containers
+            .iter()
+            .map(|entry| ContainerBrief {
+                id: entry.value().config.id.to_string(),
+                title: entry.value().config.name.to_string(),
+                banner: false,
+                icon: false,
+                updated: entry.value().last_modified.timestamp()
+            })
+            .collect::<Vec<_>>();
+
+        Ok(
+            tonic::Response::new(QueryContainersResponse { containers, })
+        )
     }
 
     async fn container_status(self: Arc<Self>, _: tonic::Request<ContainerStatusRequest>) -> Result<tonic::Response<ContainerStatusResponse>, tonic::Status> {
