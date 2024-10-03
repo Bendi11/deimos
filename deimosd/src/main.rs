@@ -27,13 +27,15 @@ async fn main() -> ExitCode {
         .with(filter)
         .init();
 
-    let config_str = match util::load_check_permissions(CONFIG_PATH).await {
+    let config_buf = match util::load_check_permissions(CONFIG_PATH).await {
         Ok(v) => v,
         Err(e) => {
             tracing::error!("Failed to load config file {CONFIG_PATH}: {e}");
             return ExitCode::FAILURE;
         }
     };
+
+    let config_str = String::from_utf8_lossy(&config_buf);
 
     let toml_de = toml::Deserializer::new(&config_str);
     let conf = match DeimosConfig::deserialize(toml_de) {

@@ -6,7 +6,7 @@ use tokio::{fs::File, io::AsyncReadExt};
 
 /// Open the file at the given path and ensure that its permissions are as good as 700 at least,
 /// then read it to a string
-pub async fn load_check_permissions(path: impl AsRef<Path>) -> Result<String, std::io::Error> {
+pub async fn load_check_permissions(path: impl AsRef<Path>) -> Result<Vec<u8>, std::io::Error> {
     let mut file = File::open(&path).await?;
     let meta = file.metadata().await?;
 
@@ -21,8 +21,8 @@ pub async fn load_check_permissions(path: impl AsRef<Path>) -> Result<String, st
         }
     }
     
-    let mut string = String::with_capacity(meta.len() as usize);
-    file.read_to_string(&mut string).await?;
+    let mut buf = Vec::with_capacity(meta.len() as usize);
+    file.read_to_end(&mut buf).await?;
 
-    Ok(string)
+    Ok(buf)
 }
