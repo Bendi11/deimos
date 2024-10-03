@@ -1,10 +1,9 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll};
 
-use bollard::secret::ContainerStatus;
-use deimos_shared::{ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
-use tokio_util::sync::CancellationToken;
+use deimos_shared::{ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, QueryContainersRequest, QueryContainersResponse};
+use futures::{future::BoxFuture, Future, FutureExt, Stream};
+use tokio::sync::{broadcast, Mutex};
 use async_trait::async_trait;
-use tonic::transport::Server;
 
 use super::Deimos;
 
@@ -13,10 +12,6 @@ use super::Deimos;
 /// A connection to a remote client, with references to state required to serve RPC requests
 pub struct ApiState {
     config: ApiConfig,
-}
-
-pub struct ApiServer {
-    deimos: Arc<Deimos>,
 }
 
 /// Configuration used to initialize and inform the Deimos API service
@@ -41,7 +36,17 @@ impl ApiState {
     }
 }
 
-pub struct ContainerStatusStreamer(Arc<Deimos>);
+pub struct ContainerStatusStreamer {
+    channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>,
+    state: Pin<Box<dyn Future<Output = Option<ContainerStatusNotification>> + 'static + Send>>,
+}
+
+impl Deimos {
+    pub async fn serve_api(self: Arc<Self>) {
+
+    }
+}
+
 
 #[async_trait]
 impl DeimosService for Deimos {
@@ -56,17 +61,54 @@ impl DeimosService for Deimos {
     type ContainerStatusStreamStream = ContainerStatusStreamer;
 
     async fn container_status_stream(self: Arc<Self>, _: tonic::Request<ContainerStatusStreamRequest>) -> Result<tonic::Response<ContainerStatusStreamer>, tonic::Status> {
-        Err(tonic::Status::unimplemented("unimplemented"))
+        let rx = self.status.subscribe();
+
+        Ok(
+            tonic::Response::new(
+                ContainerStatusStreamer::new(rx)
+            )
+        )
     }
 }
 
-impl futures::Stream for ContainerStatusStreamer {
+impl Stream for ContainerStatusStreamer {
     type Item = Result<ContainerStatusNotification, tonic::Status>;
 
-    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
-        std::task::Poll::Pending
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
+        match self.state.as_mut().poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(val) => {
+                self.state = Self::future(self.channel.clone());
+                Poll::Ready(Some(val.ok_or_else(|| tonic::Status::internal("Failed to receive container notification"))))
+            }
+        }
     }
 }
+
+impl ContainerStatusStreamer {
+    pub fn new(channel: broadcast::Receiver<ContainerStatusNotification>) -> Self {
+        let channel = Arc::new(Mutex::new(channel));
+        let state = Self::future(channel.clone());
+
+        Self {
+            channel,
+            state,
+        }
+    }
+
+    fn future(channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>) -> BoxFuture<'static, Option<ContainerStatusNotification>> {
+        Box::pin(async move {
+            channel
+                .lock()
+                .await
+                .recv()
+                .map(Result::ok)
+                .await
+        })
+    }
+}
+
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiInitError {

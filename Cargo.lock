@@ -1020,6 +1020,7 @@ dependencies = [
  "deimos-shared",
  "futures",
  "igd-next",
+ "pin-project",
  "serde",
  "thiserror",
  "tokio",

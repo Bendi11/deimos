@@ -13,6 +13,7 @@ tokio-util = "0.7"
 thiserror = "1.0"
 futures = "0.3"
 async-trait = "0.1"
+pin-project = "1.1"
 
 igd-next = { version = "0.15", features = ["aio_tokio"] }
 
@@ -23,6 +24,7 @@ tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 toml = "0.8"
 dashmap = "6.1"
+
 
 [package.metadata.deb]
 maintainer-scripts = "debian"

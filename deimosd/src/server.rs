@@ -1,6 +1,7 @@
 use std::{process::ExitCode, sync::Arc};
 
 use api::{ApiConfig, ApiInitError};
+use deimos_shared::ContainerStatusNotification;
 use docker::{DockerConfig, DockerState};
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
@@ -11,6 +12,7 @@ mod api;
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
 pub struct Deimos {
     docker: DockerState,
+    status: tokio::sync::broadcast::Sender<ContainerStatusNotification>
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -28,9 +30,12 @@ impl Deimos {
             .await
             .map_err(ServerInitError::Docker)?;
 
+        let (status, _) = tokio::sync::broadcast::channel(2);
+
         Ok(
             Arc::new(Self {
                 docker,
+                status
             })
         )
     }
