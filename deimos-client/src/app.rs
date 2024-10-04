@@ -6,7 +6,7 @@ use loader::{LoaderMessage, LoadWrapper};
 use settings::{Settings, SettingsMessage};
 use style::{Column, Container, Element, Row, Rule, Text, Theme};
 
-use crate::context::{container::CachedContainerInfo, Context, ContextState};
+use crate::context::{container::CachedContainer, Context, ContextState};
 
 mod loader;
 mod config;
@@ -31,7 +31,7 @@ pub struct DeimosApplicationState {
 pub enum DeimosView {
     Empty,
     Settings,
-    Server(Weak<CachedContainerInfo>),
+    Server(Weak<CachedContainer>),
 }
 
 

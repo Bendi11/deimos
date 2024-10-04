@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use container::CachedContainerInfo;
-use deimos_shared::{DeimosClient, QueryContainersRequest};
+use container::CachedContainer;
+use deimos_shared::{DeimosServiceClient, QueryContainersRequest};
 use http::Uri;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tonic::{transport::Channel, Code, Status};
@@ -12,8 +12,8 @@ pub mod container;
 #[derive(Debug)]
 pub struct Context {
     state: ContextState,
-    api: RwLock<DeimosClient<Channel>>,
-    containers: Vec<Arc<CachedContainerInfo>>,
+    api: RwLock<DeimosServiceClient<Channel>>,
+    containers: Vec<Arc<CachedContainer>>,
 }
 
 /// Persistent state kept for the [Context]'s connection
@@ -30,7 +30,7 @@ impl Context {
     /// is made
     pub async fn new(state: ContextState) -> Self {
         let api = RwLock::new(
-            DeimosClient::new(
+            DeimosServiceClient::new(
                 Channel::builder(state.server_uri.clone())
                     .connect_timeout(state.connect_timeout)
                     .timeout(state.request_timeout)
@@ -48,7 +48,7 @@ impl Context {
     }
     
     /// Get an iterator over the currently cached containers
-    pub fn containers(&self) -> impl Iterator<Item = Arc<CachedContainerInfo>> + '_ {
+    pub fn containers(&self) -> impl Iterator<Item = Arc<CachedContainer>> + '_ {
         self
             .containers
             .iter()
@@ -57,7 +57,7 @@ impl Context {
 
         
     /// Get a reference to the client used to issue API requests to the server
-    pub async fn api(&self) -> RwLockReadGuard<'_, DeimosClient<Channel>> {
+    pub async fn api(&self) -> RwLockReadGuard<'_, DeimosServiceClient<Channel>> {
         self.api.read().await
     }
 }
