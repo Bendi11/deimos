@@ -1,11 +1,11 @@
 use std::{process::ExitCode, sync::{Arc, Weak}};
 
-use iced::{alignment::Horizontal, widget::{container, svg, Space, Svg}, Length, Padding, Pixels, Size, Task};
+use iced::{alignment::Horizontal, border::Radius, widget::{container, svg, Space, Svg}, Background, Length, Padding, Pixels, Shadow, Task, Vector};
 use loader::{LoaderMessage, LoadWrapper};
 use settings::{Settings, SettingsMessage};
-use style::{Column, Container, Element, Row, Rule, Text, Theme};
+use style::{container::ContainerClass, orbit, svg::SvgClass, Column, Container, Element, Row, Rule, Text, Theme};
 
-use crate::context::{container::CachedContainer, Context, ContextState};
+use crate::context::{container::CachedContainer, Context};
 
 mod loader;
 mod settings;
@@ -31,7 +31,7 @@ pub enum DeimosView {
 pub enum DeimosMessage {
     Navigate(DeimosView),
     Settings(SettingsMessage),
-    RecvContainers,
+    ContainerUpdate,
 }
 
 
@@ -59,6 +59,7 @@ impl DeimosApplication {
                 LoadWrapper::update,
                 LoadWrapper::view
             )
+            .antialiasing(true)
             .executor::<iced::executor::Default>()
             .theme(|_| Theme::default())
             .run_with(move ||
@@ -85,48 +86,75 @@ impl DeimosApplication {
                 iced::Task::none()
             },
             DeimosMessage::Settings(msg) => self.settings.update(msg).map(DeimosMessage::Settings),
-            DeimosMessage::RecvContainers => ().into(),
+            DeimosMessage::ContainerUpdate => ().into(),
         }
     }
 
+    fn empty_view(&self) -> Element<DeimosMessage> {
+        Column::new()
+            .push(
+                Container::new(
+                    self.settings.icon()
+                        .map(DeimosMessage::Navigate)
+                )
+                    .align_right(Length::Fill)
+                    .height(Length::Fixed(45f32))
+            )
+            .push(
+                Text::new("Main view")
+            )
+            .width(Length::FillPortion(3))
+            .into()
+
+    }
+
     fn view(&self) -> Element<DeimosMessage> {
+        let header = Row::new()
+            .push(
+                Svg::new(self.icon.clone())
+                    .class(orbit::MARS[1])
+                .height(64f32)
+                .width(Length::FillPortion(1))
+            )
+            .push(
+                Column::new()
+                    .push(Text::new("Deimos")
+                        .center()
+                    )
+                    .align_x(Horizontal::Center)
+                    .width(Length::FillPortion(1))
+            )
+            .padding(Padding::default()
+                .top(16f32)
+            )
+            .height(128);
+
         Row::new()
             .push(
-                Column::new()
-                    .push(
-                        Row::new()
-                            .push(Space::new(50f32, 0f32))
-                            .push(Svg::new(self.icon.clone())
-                                .class(style::orbit::MARS[1])
-                                .width(Length::Shrink)
-                            )
-                            .push(Text::new("Deimos")
-                                .size(32f32)
-                                .center()
-                            )
-                            .height(Length::Fixed(64f32))
-                    )
-                    .push(Rule::horizontal(Pixels(2f32)))
+                Container::new(
+                    Column::new()
+                        .push(header)
+                ).class(ContainerClass {
+                        radius: Radius {
+                            top_left: 0f32,
+                            top_right: 5f32,
+                            bottom_right: 5f32,
+                            bottom_left: 0f32,
+                        },
+                        background: Some(Background::Color(orbit::NIGHT[1])),
+                        shadow: Some(Shadow {
+                            color: orbit::NIGHT[3],
+                            offset: Vector::new(1f32, 0f32),
+                            blur_radius: 16f32
+                        })
+                })
+                .height(Length::Fill)
             )
-            .push(
-                Rule::vertical(Pixels(3f32))
-            )
-            .push(
-                Column::new()
-                    .push(
-                        Container::new(
-                            self.settings.icon()
-                                .map(DeimosMessage::Navigate)
-                        )
-                            .class(<Theme as container::Catalog>::Class::Invisible)
-                            .align_right(Length::Fill)
-                            .height(Length::Fixed(45f32))
-                    )
-                    .push(
-                        Text::new("Main view")
-                    )
-                    .width(Length::FillPortion(3))
-            )
+            .push(match self.view {
+                DeimosView::Empty => self.empty_view(),
+                DeimosView::Settings => self.settings.view().map(DeimosMessage::Settings),
+                _ => self.empty_view()
+            })
             .into()
     }
 }

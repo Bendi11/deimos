@@ -8,6 +8,7 @@ pub struct SvgClass {
     hovered: Option<Color>,
 }
 
+
 impl svg::Catalog for Theme {
     type Class<'a> = SvgClass;
 

@@ -31,7 +31,6 @@ impl LoadWrapper {
                     .width(Length::Fixed(30f32))
                     .height(Length::Fixed(30f32))
             )
-                .class(<Theme as container::Catalog>::Class::Invisible)
                 .center(Length::Fill)
                 .into()
         }

@@ -19,13 +19,19 @@ pub struct Context {
     containers: RwLock<HashMap<String, Arc<CachedContainer>>>,
 }
 
+/// Settings that may be adjusted by the user
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ContextSettings {
+   #[serde(with="http_serde::uri")]
+    pub server_uri: Uri,
+    pub request_timeout: Duration,
+    pub connect_timeout: Duration, 
+}
+
 /// Persistent state kept for the [Context]'s connection
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextState {
-    #[serde(with="http_serde::uri")]
-    pub server_uri: Uri,
-    pub request_timeout: Duration,
-    pub connect_timeout: Duration,
+    pub settings: ContextSettings,
     /// Timestamp of the last container synchronization
     pub last_sync: Option<DateTime<Utc>>,
 }
@@ -46,9 +52,9 @@ impl Context {
 
         let api = Mutex::new(
             DeimosServiceClient::new(
-                Channel::builder(state.server_uri.clone())
-                    .connect_timeout(state.connect_timeout)
-                    .timeout(state.request_timeout)
+                Channel::builder(state.settings.server_uri.clone())
+                    .connect_timeout(state.settings.connect_timeout)
+                    .timeout(state.settings.request_timeout)
                     .connect_lazy()
             )
         );
@@ -65,6 +71,11 @@ impl Context {
 
         me
     }
+    
+    /// Get the settings applied to this context
+    pub fn settings(&self) -> ContextSettings {
+        self.state.settings.clone()
+    }
 
     fn cache_directory() -> PathBuf {
         match dirs::cache_dir() {
@@ -77,9 +88,11 @@ impl Context {
 impl Default for ContextState {
     fn default() -> Self {
         Self {
-            server_uri: Uri::default(),
-            request_timeout: Duration::from_secs(30),
-            connect_timeout: Duration::from_secs(60),
+            settings: ContextSettings {
+                server_uri: Uri::default(),
+                request_timeout: Duration::from_secs(30),
+                connect_timeout: Duration::from_secs(60),
+            },
             last_sync: None,
         }
     }

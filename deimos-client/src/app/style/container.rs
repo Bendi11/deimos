@@ -1,41 +1,33 @@
-use iced::{border::Radius, widget::container, Background, Border, Shadow, Vector};
+use iced::{border::Radius, widget::container, Background, Border, Color, Shadow, Vector};
 
 use super::Theme;
 
-pub enum ContainerClass {
-    RoundedBorder,
-    Invisible,
+pub struct ContainerClass {
+    pub radius: Radius,
+    pub background: Option<Background>,
+    pub shadow: Option<Shadow>,
 }
 
 impl container::Catalog for Theme {
     type Class<'a> = ContainerClass;
 
     fn default<'a>() -> Self::Class<'a> {
-        ContainerClass::RoundedBorder
+        ContainerClass {
+            radius: Default::default(),
+            background: None,
+            shadow: None,
+        }
     }
 
     fn style(&self, class: &Self::Class<'_>) -> container::Style {
-        match class {
-            ContainerClass::RoundedBorder => container::Style {
-                text_color: None,
-                background: Some(Background::Color(self.bg_light)),
-                border: Border {
-                    color: self.rule,
-                    width: 2f32,
-                    radius: Radius::from(5f32),
-                },
-                shadow: Shadow {
-                    color: iced::Color::BLACK,
-                    offset: Vector::new(0f32, 2f32),
-                    blur_radius: 2f32,
-                }
+        container::Style {
+            text_color: None,
+            border: Border {
+                radius: class.radius,
+                ..Default::default()
             },
-            ContainerClass::Invisible => container::Style {
-                text_color: None,
-                background: None,
-                border: Border::default(),
-                shadow: Shadow::default()
-            }
+            background: class.background,
+            shadow: class.shadow.unwrap_or_default(),
         }
     }
 }
