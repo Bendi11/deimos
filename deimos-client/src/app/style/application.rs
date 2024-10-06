@@ -8,5 +8,5 @@ impl application::DefaultStyle for Theme {
             background_color: self.bg_dark,
             text_color: self.text_normal,
         }
-    } 
+    }
 }

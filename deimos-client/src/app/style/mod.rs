@@ -1,15 +1,14 @@
 use iced::Color;
 
-
 pub mod orbit;
 
 pub mod application;
-pub mod text;
-pub mod rule;
-pub mod scrollable;
 pub mod button;
 pub mod container;
+pub mod rule;
+pub mod scrollable;
 pub mod svg;
+pub mod text;
 pub mod text_input;
 
 pub struct Theme {
@@ -21,7 +20,7 @@ pub struct Theme {
     pub text_bright: Color,
     pub text_normal: Color,
     pub text_dim: Color,
-    
+
     pub active: Color,
     pub warn: Color,
     pub error: Color,

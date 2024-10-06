@@ -19,15 +19,15 @@ impl text_input::Catalog for Theme {
             border: iced::Border {
                 color: match status {
                     text_input::Status::Focused => self.active,
-                    _ => self.text_dim
+                    _ => self.text_dim,
                 },
                 width: 2f32,
-                radius: Radius::from(5f32)
+                radius: Radius::from(5f32),
             },
             icon: self.text_bright,
             placeholder: self.text_dim,
             value: self.text_normal,
-            selection: self.warn
-        }    
+            selection: self.warn,
+        }
     }
 }

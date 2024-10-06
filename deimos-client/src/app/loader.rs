@@ -1,8 +1,9 @@
 use iced::{widget::container, Length, Task};
 
-use super::{style::{Container, Element, Theme}, DeimosApplication, DeimosMessage};
-
-
+use super::{
+    style::{Container, Element, Theme},
+    DeimosApplication, DeimosMessage,
+};
 
 /// Wrapper to create the application context before launching the main application
 pub struct LoadWrapper {
@@ -18,9 +19,7 @@ pub enum LoaderMessage {
 impl LoadWrapper {
     /// Create a new LoadWrapper with no loaded application
     pub fn new() -> Self {
-        Self {
-            state: None,
-        }
+        Self { state: None }
     }
 
     pub fn view(&self) -> Element<LoaderMessage> {
@@ -29,19 +28,17 @@ impl LoadWrapper {
             None => Container::new(
                 iced_aw::Spinner::new()
                     .width(Length::Fixed(30f32))
-                    .height(Length::Fixed(30f32))
+                    .height(Length::Fixed(30f32)),
             )
-                .center(Length::Fill)
-                .into()
+            .center(Length::Fill)
+            .into(),
         }
     }
 
     pub fn update(&mut self, msg: LoaderMessage) -> Task<LoaderMessage> {
         match self.state {
             Some(ref mut app) => match msg {
-                LoaderMessage::Application(msg) => app
-                    .update(msg)
-                    .map(Into::into),
+                LoaderMessage::Application(msg) => app.update(msg).map(Into::into),
                 _ => Task::none(),
             },
             None => {

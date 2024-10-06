@@ -1,9 +1,20 @@
-use std::{process::ExitCode, sync::{Arc, Weak}};
+use std::{
+    process::ExitCode,
+    sync::{Arc, Weak},
+};
 
-use iced::{alignment::Horizontal, border::Radius, futures::FutureExt, widget::{svg, Svg}, Background, Length, Padding, Shadow, Task, Vector};
-use loader::{LoaderMessage, LoadWrapper};
+use iced::{
+    alignment::Horizontal,
+    border::Radius,
+    futures::FutureExt,
+    widget::{svg, Svg},
+    Background, Length, Padding, Shadow, Task, Vector,
+};
+use loader::{LoadWrapper, LoaderMessage};
 use settings::{Settings, SettingsMessage};
-use style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Text, Theme};
+use style::{
+    container::ContainerClass, orbit, Button, Column, Container, Element, Row, Text, Theme,
+};
 
 use crate::context::{container::CachedContainer, Context};
 
@@ -26,7 +37,6 @@ pub enum DeimosView {
     Server(Weak<CachedContainer>),
 }
 
-
 #[derive(Debug, Clone)]
 pub enum DeimosMessage {
     BeginNavigateSettings,
@@ -35,13 +45,12 @@ pub enum DeimosMessage {
     ContainerUpdate,
 }
 
-
 impl DeimosApplication {
     /// Load application state from a save file and return the application
     async fn load() -> Self {
         let ctx = Context::new().await;
         let view = DeimosView::Empty;
-        
+
         let icon = svg::Handle::from_memory(include_bytes!("../assets/mars-deimos.svg"));
         let settings_icon = svg::Handle::from_memory(include_bytes!("../assets/settings.svg"));
 
@@ -54,28 +63,21 @@ impl DeimosApplication {
     }
 
     pub fn run() -> ExitCode {
-        match iced::application(
-                "Deimos",
-                LoadWrapper::update,
-                LoadWrapper::view
-            )
+        match iced::application("Deimos", LoadWrapper::update, LoadWrapper::view)
             .antialiasing(true)
             .executor::<iced::executor::Default>()
             .theme(|_| Theme::default())
-            .run_with(move ||
+            .run_with(move || {
                 (
                     LoadWrapper::new(),
-                    Task::perform(
-                        Self::load(),
-                        LoaderMessage::Loaded,
-                    )
+                    Task::perform(Self::load(), LoaderMessage::Loaded),
                 )
-            ) {
+            }) {
             Ok(_) => ExitCode::SUCCESS,
             Err(e) => {
                 tracing::error!("Failed to run iced application: {e}");
                 ExitCode::FAILURE
-            },
+            }
         }
     }
 
@@ -84,28 +86,26 @@ impl DeimosApplication {
             DeimosMessage::Navigate(view) => {
                 let ctx = self.ctx.clone();
                 match std::mem::replace(&mut self.view, view) {
-                    DeimosView::Settings(s) => Task::future(
-                        async move {
-                            ctx.reload_settings(s.edited).await;
-                        }
-                    ).discard(),
-                    _ => iced::Task::none()
+                    DeimosView::Settings(s) => Task::future(async move {
+                        ctx.reload_settings(s.edited).await;
+                    })
+                    .discard(),
+                    _ => iced::Task::none(),
                 }
-            },
-            DeimosMessage::Settings(msg) => if let DeimosView::Settings(ref mut settings) = self.view {
-                settings
-                    .update(msg)
-                    .map(DeimosMessage::Settings)
-            } else {
-                ().into()
-            },
+            }
+            DeimosMessage::Settings(msg) => {
+                if let DeimosView::Settings(ref mut settings) = self.view {
+                    settings.update(msg).map(DeimosMessage::Settings)
+                } else {
+                    ().into()
+                }
+            }
             DeimosMessage::ContainerUpdate => ().into(),
             DeimosMessage::BeginNavigateSettings => {
                 let ctx = self.ctx.clone();
-                Task::perform(
-                    async move { Settings::new(ctx.settings().await) },
-                    |s| DeimosMessage::Navigate(DeimosView::Settings(s))
-                )
+                Task::perform(async move { Settings::new(ctx.settings().await) }, |s| {
+                    DeimosMessage::Navigate(DeimosView::Settings(s))
+                })
             }
         }
     }
@@ -117,19 +117,16 @@ impl DeimosApplication {
                     Button::new(
                         Svg::new(self.settings_icon.clone())
                             .class((orbit::MERCURY[1], orbit::SOL[0]))
-                            .width(Length::Shrink)
+                            .width(Length::Shrink),
                     )
-                    .on_press(DeimosMessage::BeginNavigateSettings)
+                    .on_press(DeimosMessage::BeginNavigateSettings),
                 )
-                    .align_right(Length::Fill)
-                    .height(Length::Fixed(45f32))
+                .align_right(Length::Fill)
+                .height(Length::Fixed(45f32)),
             )
-            .push(
-                Text::new("Main view")
-            )
+            .push(Text::new("Main view"))
             .width(Length::FillPortion(3))
             .into()
-
     }
 
     fn view(&self) -> Element<DeimosMessage> {
@@ -137,32 +134,27 @@ impl DeimosApplication {
             .push(
                 Svg::new(self.icon.clone())
                     .class(orbit::MARS[1])
-                .height(64f32)
-                .width(Length::FillPortion(1))
+                    .height(64f32)
+                    .width(Length::FillPortion(1)),
             )
             .push(
                 Column::new()
-                    .push(Text::new("Deimos")
-                        .size(30f32)
-                        .wrapping(iced::widget::text::Wrapping::None)
-                        .center()
+                    .push(
+                        Text::new("Deimos")
+                            .size(30f32)
+                            .wrapping(iced::widget::text::Wrapping::None)
+                            .center(),
                     )
                     .align_x(Horizontal::Center)
-                    .width(Length::FillPortion(1))
+                    .width(Length::FillPortion(1)),
             )
-            .padding(Padding::default()
-                .top(16f32)
-                .left(16f32)
-                .right(16f32)
-            )
+            .padding(Padding::default().top(16f32).left(16f32).right(16f32))
             .height(128);
 
         Row::new()
             .push(
-                Container::new(
-                    Column::new()
-                        .push(header)
-                ).class(ContainerClass {
+                Container::new(Column::new().push(header))
+                    .class(ContainerClass {
                         radius: Radius {
                             top_left: 0f32,
                             top_right: 5f32,
@@ -173,16 +165,16 @@ impl DeimosApplication {
                         shadow: Some(Shadow {
                             color: orbit::NIGHT[3],
                             offset: Vector::new(1f32, 0f32),
-                            blur_radius: 16f32
-                        })
-                })
-                .width(Length::Fixed(256f32))
-                .height(Length::Fill)
+                            blur_radius: 16f32,
+                        }),
+                    })
+                    .width(Length::Fixed(256f32))
+                    .height(Length::Fill),
             )
             .push(match self.view {
                 DeimosView::Empty => self.empty_view(),
                 DeimosView::Settings(ref s) => s.view().map(DeimosMessage::Settings),
-                _ => self.empty_view()
+                _ => self.empty_view(),
             })
             .into()
     }
@@ -194,10 +186,9 @@ impl Drop for DeimosApplication {
             let ctx = self.ctx.clone();
             let settings = s.edited.clone();
             if let Ok(rt) = tokio::runtime::Runtime::new() {
-                rt
-                    .block_on(async move {
-                        ctx.reload_settings(settings).await;
-                    })
+                rt.block_on(async move {
+                    ctx.reload_settings(settings).await;
+                })
             }
         }
     }

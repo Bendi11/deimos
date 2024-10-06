@@ -19,9 +19,7 @@ fn main() -> ExitCode {
         .without_time()
         .finish();
 
-    subscriber
-        .with(filter)
-        .init();
+    subscriber.with(filter).init();
 
     app::DeimosApplication::run()
 }

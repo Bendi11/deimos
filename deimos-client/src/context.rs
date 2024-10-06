@@ -21,10 +21,10 @@ pub struct Context {
 /// Settings that may be adjusted by the user
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextSettings {
-   #[serde(with="http_serde::uri")]
+    #[serde(with = "http_serde::uri")]
     pub server_uri: Uri,
     pub request_timeout: Duration,
-    pub connect_timeout: Duration, 
+    pub connect_timeout: Duration,
 }
 
 /// Persistent state kept for the [Context]'s connection
@@ -63,16 +63,16 @@ impl Context {
 
         me
     }
-    
+
     async fn connect_api(state: &ContextState) -> DeimosServiceClient<Channel> {
         DeimosServiceClient::new(
             Channel::builder(state.settings.server_uri.clone())
                 .connect_timeout(state.settings.connect_timeout)
                 .timeout(state.settings.request_timeout)
-                .connect_lazy()
+                .connect_lazy(),
         )
     }
-    
+
     /// Reload the current context with the given updated settings
     pub async fn reload_settings(self: Arc<Self>, settings: ContextSettings) {
         let mut old_state = self.state.write().await;
@@ -82,11 +82,11 @@ impl Context {
             settings,
             last_sync: old_state.last_sync,
         };
-        
+
         *api = Self::connect_api(&state).await;
         *old_state = state;
     }
-    
+
     /// Get the settings applied to this context
     pub async fn settings(&self) -> ContextSettings {
         self.state.read().await.settings.clone()

@@ -4,12 +4,12 @@ use super::Theme;
 
 pub enum TextClass {
     Normal,
-    Heading
+    Heading,
 }
 
 impl text::Catalog for Theme {
     type Class<'a> = TextClass;
-    
+
     fn default<'a>() -> Self::Class<'a> {
         TextClass::Normal
     }
@@ -17,11 +17,11 @@ impl text::Catalog for Theme {
     fn style(&self, item: &Self::Class<'_>) -> text::Style {
         match item {
             TextClass::Normal => text::Style {
-                color: Some(self.text_normal)
+                color: Some(self.text_normal),
             },
             TextClass::Heading => text::Style {
-                color: Some(self.text_bright)
-            }
+                color: Some(self.text_bright),
+            },
         }
     }
 }

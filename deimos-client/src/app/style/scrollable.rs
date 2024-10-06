@@ -1,4 +1,11 @@
-use iced::{border::Radius, widget::{container, scrollable::{self, Scroller}}, Background, Border, Shadow, Vector};
+use iced::{
+    border::Radius,
+    widget::{
+        container,
+        scrollable::{self, Scroller},
+    },
+    Background, Border, Shadow, Vector,
+};
 
 use super::Theme;
 
@@ -16,7 +23,7 @@ impl Theme {
                 color: iced::Color::BLACK,
                 offset: Vector::new(0f32, 0f32),
                 blur_radius: 0f32,
-            }
+            },
         }
     }
 
@@ -24,7 +31,7 @@ impl Theme {
         Border {
             color: self.active,
             width: 1f32,
-            radius: Radius::from(0.5f32)
+            radius: Radius::from(0.5f32),
         }
     }
 
@@ -41,9 +48,9 @@ impl Theme {
                 border: Border {
                     color: self.text_normal,
                     width: 1f32,
-                    radius: Radius::from(1f32)
-                }
-            }
+                    radius: Radius::from(1f32),
+                },
+            },
         }
     }
 }
@@ -54,9 +61,8 @@ impl scrollable::Catalog for Theme {
     fn default<'a>() -> Self::Class<'a> {}
 
     fn style(&self, _: &Self::Class<'_>, status: scrollable::Status) -> scrollable::Style {
-         match status {
-            scrollable::Status::Active |
-            scrollable::Status::Dragged { .. } => scrollable::Style {
+        match status {
+            scrollable::Status::Active | scrollable::Status::Dragged { .. } => scrollable::Style {
                 container: self.scrollbar_container(),
                 gap: None,
                 vertical_rail: scrollable::Rail {
@@ -85,8 +91,7 @@ impl scrollable::Catalog for Theme {
                     },
                 },
                 horizontal_rail: self.invisible_rail(),
-            }
-
+            },
         }
     }
 }

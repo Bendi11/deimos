@@ -1,4 +1,7 @@
-use iced::{border::Radius, widget::rule::{self, FillMode}};
+use iced::{
+    border::Radius,
+    widget::rule::{self, FillMode},
+};
 
 use super::Theme;
 
@@ -19,8 +22,8 @@ impl rule::Catalog for Theme {
                 color: self.rule,
                 width: 1,
                 radius: Radius::from(0f32),
-                fill_mode: FillMode::Full
-            }
+                fill_mode: FillMode::Full,
+            },
         }
     }
 }

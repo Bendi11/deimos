@@ -8,7 +8,6 @@ pub struct SvgClass {
     hovered: Option<Color>,
 }
 
-
 impl svg::Catalog for Theme {
     type Class<'a> = SvgClass;
 
@@ -30,7 +29,7 @@ impl From<Option<Color>> for SvgClass {
     fn from(value: Option<Color>) -> Self {
         Self {
             normal: value,
-            hovered: value
+            hovered: value,
         }
     }
 }

@@ -1,7 +1,6 @@
 use iced::color;
 
-
-pub type ColorLevels = [iced::Color ; 4];
+pub type ColorLevels = [iced::Color; 4];
 
 pub const NIGHT: ColorLevels = [
     color!(0x2e2e2e),
