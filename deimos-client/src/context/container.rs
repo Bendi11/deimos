@@ -1,6 +1,7 @@
 use std::{path::{Path, PathBuf}, sync::Arc};
 
 use chrono::{DateTime, Utc};
+use deimos_shared::{ContainerBrief, QueryContainersRequest};
 use iced::widget::image;
 
 use super::Context;
@@ -24,12 +25,32 @@ pub struct CachedContainerData {
 }
 
 impl Context {
-    pub async fn synchronize_container(self: Arc<Self>) {
+    /// Synchronize containers from a received list of container data from the server
+    pub async fn synchronize_containers(self: Arc<Self>) {
+        let request = QueryContainersRequest {
+            updated_since: self.state.last_sync.map(|dt| dt.timestamp()),
+        };
 
+        let mut api = self.api.lock().await;
+        let list = match api.query_containers(request).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::error!("Failed to query containers from the server: {e}");
+                return
+            }
+        };
+
+        
     }
     
     /// Attempt to load all containers from the given local cache directory
-    async fn load_cached_containers(&self, dir: &Path) {
+    pub(super) async fn load_cached_containers(&self, dir: &Path) {
+        if !dir.exists() {
+            if let Err(e) = tokio::fs::create_dir(dir).await {
+                tracing::error!("Failed to create cache directory '{}': {}", dir.display(), e);
+            }
+        }
+
         let mut iter = match tokio::fs::read_dir(dir).await {
             Ok(r) => r,
             Err(e) => {

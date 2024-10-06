@@ -1,6 +1,7 @@
 use std::{process::ExitCode, sync::{Arc, Weak}};
 
 use config::LoadStateError;
+use deimos_shared::ContainerBrief;
 use iced::{alignment::Horizontal, widget::{container, svg, Space, Svg}, Length, Padding, Pixels, Size, Task};
 use loader::{LoaderMessage, LoadWrapper};
 use settings::{Settings, SettingsMessage};
@@ -39,6 +40,7 @@ pub enum DeimosView {
 pub enum DeimosMessage {
     Navigate(DeimosView),
     Settings(SettingsMessage),
+    RecvContainers,
 }
 
 impl DeimosApplication {
@@ -50,7 +52,7 @@ impl DeimosApplication {
     /// Load application state from a save file and return the application
     async fn load() -> Result<Self, DeimosApplicationLoadError>  {
         let state = Self::load_config()?;
-        let ctx = Arc::new(Context::new(state.context).await);
+        let ctx = Context::new(state.context).await;
 
         let settings = Settings::new(ctx.clone());
         let view = DeimosView::Empty;
@@ -99,6 +101,7 @@ impl DeimosApplication {
                 iced::Task::none()
             },
             DeimosMessage::Settings(msg) => self.settings.update(msg).map(DeimosMessage::Settings),
+            DeimosMessage::RecvContainers => ().into(),
         }
     }
 

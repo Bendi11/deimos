@@ -1,10 +1,12 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
+use chrono::{DateTime, Utc};
 use container::CachedContainer;
 use deimos_shared::{DeimosServiceClient, QueryContainersRequest};
 use http::Uri;
-use tokio::sync::{RwLock, RwLockReadGuard};
-use tonic::{transport::Channel, Code, Status};
+use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
+use tonic::{transport::Channel, Code};
+use tonic::Status;
 
 pub mod container;
 
@@ -12,7 +14,7 @@ pub mod container;
 #[derive(Debug)]
 pub struct Context {
     state: ContextState,
-    api: RwLock<DeimosServiceClient<Channel>>,
+    api: Mutex<DeimosServiceClient<Channel>>,
     containers: RwLock<HashMap<String, Arc<CachedContainer>>>,
 }
 
@@ -23,13 +25,17 @@ pub struct ContextState {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
+    /// Timestamp of the last container synchronization
+    pub last_sync: Option<DateTime<Utc>>,
 }
 
 impl Context {
+    pub const CACHE_DIR_NAME: &str = "deimos";
+
     /// Create a new lazy API client, which will not attempt a connection until the first API call
     /// is made
-    pub async fn new(state: ContextState) -> Self {
-        let api = RwLock::new(
+    pub async fn new(state: ContextState) -> Arc<Self> {
+        let api = Mutex::new(
             DeimosServiceClient::new(
                 Channel::builder(state.server_uri.clone())
                     .connect_timeout(state.connect_timeout)
@@ -40,17 +46,22 @@ impl Context {
 
         let containers = RwLock::new(HashMap::new());
 
-        Self {
+        let me = Arc::new(Self {
             state,
             api,
             containers,
-        }
+        });
+
+        me.load_cached_containers(&Self::cache_directory()).await;
+
+        me
     }
 
-        
-    /// Get a reference to the client used to issue API requests to the server
-    pub async fn api(&self) -> RwLockReadGuard<'_, DeimosServiceClient<Channel>> {
-        self.api.read().await
+    fn cache_directory() -> PathBuf {
+        match dirs::cache_dir() {
+            Some(dir) => dir.join(Self::CACHE_DIR_NAME),
+            None => PathBuf::from("./deimos-cache"),
+        }
     }
 }
 
@@ -60,6 +71,7 @@ impl Default for ContextState {
             server_uri: Uri::default(),
             request_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(60),
+            last_sync: None,
         }
     }
 }
