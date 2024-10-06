@@ -95,7 +95,7 @@ impl Context {
     fn cache_directory() -> PathBuf {
         match dirs::cache_dir() {
             Some(dir) => dir.join(Self::CACHE_DIR_NAME),
-            None => PathBuf::from("./deimos-cache"),
+            None => PathBuf::from("./cache"),
         }
     }
 }
@@ -110,5 +110,11 @@ impl Default for ContextState {
             },
             last_sync: None,
         }
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        self.save_state();
     }
 }

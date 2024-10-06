@@ -5,6 +5,11 @@ use super::{Context, ContextState};
 
 impl Context {
     pub const STATE_FILE_NAME: &str = "state.json";
+
+    fn state_file_path() -> PathBuf {
+        Self::cache_directory()
+            .join(Self::STATE_FILE_NAME)
+    }
     
     /// Load application context state from the local cache directory, or create a default one
     pub fn load_state() -> Result<ContextState, LoadStateError> {
@@ -39,6 +44,21 @@ impl Context {
                     kind: LoadStateErrorKind::FailedToOpen(e)
                 }
             )
+        }
+    }
+
+    pub fn save_state(&mut self) {
+        let state_path = Self::state_file_path();
+        match std::fs::File::create(&state_path) {
+            Ok(w) => {
+                let state = self.state.get_mut();
+                if let Err(e) = serde_json::to_writer::<_, ContextState>(w, state) {
+                    tracing::error!("Failed to write context state to '{}': {}", state_path.display(), e);
+                }
+            },
+            Err(e) => {
+                tracing::error!("Failed to create context state file '{}': {}", state_path.display(), e);
+            }
         }
     }
 }

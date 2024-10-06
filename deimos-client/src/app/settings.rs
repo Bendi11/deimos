@@ -1,12 +1,12 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::time::Duration;
 
 use http::Uri;
-use iced::{alignment::Horizontal, widget::{svg, Space, Text}, Length, Padding, Pixels, Task};
-use iced_aw::{time_picker::Time, TimePicker, TypedInput};
+use iced::{alignment::Horizontal, widget::Text, Length, Padding, Pixels, Task};
+use iced_aw::TypedInput;
 
-use crate::context::{Context, ContextSettings};
+use crate::context::ContextSettings;
 
-use super::{style::{Button, Column, Container, Element, Svg, TextInput}, DeimosView};
+use super::style::{Column, Container, Element};
 
 
 #[derive(Debug, Clone)]
@@ -21,8 +21,6 @@ pub enum SettingsMessage {
 }
 
 impl Settings {
-    const ICON_SVG: &[u8] = include_bytes!("../../assets/settings.svg");
-    
     /// Start a new settings editor given the current context's settings
     pub fn new(edited: ContextSettings) -> Self {
         Self {
