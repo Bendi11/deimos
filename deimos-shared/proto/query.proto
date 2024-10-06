@@ -2,6 +2,16 @@ syntax = "proto3";
 
 package deimos;
 
+// Brief description of a container to inform clients of the existence and/or updates to managed containers
+message ContainerBrief {
+    // ID of the container used to identify it in calls
+    string id = 1;
+    // User-facing title to present in UI
+    string title = 2;
+    // UTC datetime of the last change made to the container
+    int64 updated = 5;
+}
+
 message QueryContainersRequest {
     // Filter the returned containers by when they have been last updated
     optional int64 updated_since = 1;

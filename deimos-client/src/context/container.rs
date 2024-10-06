@@ -1,8 +1,9 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{path::{Path, PathBuf}, str::FromStr, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use deimos_shared::{ContainerBrief, QueryContainersRequest};
+use deimos_shared::{ContainerBrief, ContainerImage, ContainerImagesRequest, ContainerImagesResponse, QueryContainersRequest};
 use iced::widget::image;
+use mime::Mime;
 
 use super::Context;
 
@@ -30,17 +31,83 @@ impl Context {
         let request = QueryContainersRequest {
             updated_since: self.state.last_sync.map(|dt| dt.timestamp()),
         };
-
-        let mut api = self.api.lock().await;
-        let list = match api.query_containers(request).await {
-            Ok(resp) => resp,
-            Err(e) => {
-                tracing::error!("Failed to query containers from the server: {e}");
-                return
+        
+        let list = {
+            let mut api = self.api.lock().await;
+            match api.query_containers(request).await {
+                Ok(resp) => resp.into_inner().containers,
+                Err(e) => {
+                    tracing::error!("Failed to query containers from the server: {e}");
+                    return
+                }
             }
         };
 
+        for item in list {
+            self.synchronize_container_from_brief(item).await;
+        }
+    }
+    
+    /// Check if the received container is already cached at its newest version, and request full
+    /// container data including images if it is not
+    async fn synchronize_container_from_brief(&self, brief: ContainerBrief) {
+        let Some(updated) = DateTime::from_timestamp(brief.updated, 0) else {
+            tracing::warn!("Failed to create timestamp from container brief timestamp {}", brief.updated);
+            return
+        };
         
+        {
+            let containers = self.containers.read().await;
+            match containers.get(&brief.id) {
+                Some(existing) if existing.data.last_update >= updated => {
+                    tracing::info!("Skipping update for received container {}, we already have the newest version", brief.id);
+                    return
+                },
+                _ => ()
+            };
+        }
+        
+        let images = {
+            let mut api = self.api.lock().await;
+            let request = ContainerImagesRequest { container_id: brief.id.clone() };
+            match api.get_container_image(request).await {
+                Ok(images) => images.into_inner(),
+                Err(e) => {
+                    tracing::error!("Failed to get images for {}: {}", brief.id, e);
+                    ContainerImagesResponse { banner: None, icon: None }
+                }
+            }
+        };
+
+        let load_if_supported = |image: ContainerImage| {
+            let mime = match Mime::from_str(&image.mime_type) {
+                Ok(m) => m,
+                Err(e) => {
+                    tracing::error!("Invalid image MIME type '{}' from server for container {}: {}", image.mime_type, brief.id, e);
+                    return None
+                }
+            };
+
+            CachedContainer::supported_image_mime(mime)
+                .then(|| image::Handle::from_bytes(image.image_data))
+        };
+
+        let banner = images.banner.and_then(load_if_supported);
+        let icon = images.icon.and_then(load_if_supported);
+
+        let data = CachedContainerData {
+            id: brief.id,
+            name: brief.title,
+            last_update: DateTime::from_timestamp(brief.updated, 0).unwrap_or_default()
+        };
+
+        let container = CachedContainer {
+            data,
+            banner,
+            icon,
+        };
+
+        self.containers.write().await.insert(container.data.id.clone(), Arc::new(container));   
     }
     
     /// Attempt to load all containers from the given local cache directory
@@ -118,6 +185,14 @@ impl CachedContainer {
     const METADATA_FILE: &str = "meta.json";
     const BANNER_FILENAME: &str = "banner";
     const ICON_FILENAME: &str = "icon";
+    
+    /// Check if the image with the given MIME type received from the server is supported by the
+    /// frontend
+    fn supported_image_mime(kind: Mime) -> bool {
+        kind == mime::IMAGE_JPEG ||
+        kind == mime::IMAGE_PNG ||
+        kind == mime::IMAGE_BMP
+    }
     
     /// Load a cached container from a local cache directory
     async fn load(data: CachedContainerData, directory: &Path) -> Self {

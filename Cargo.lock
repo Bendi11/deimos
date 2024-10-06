@@ -989,6 +989,7 @@ dependencies = [
  "http-serde",
  "iced",
  "iced_aw",
+ "mime",
  "serde",
  "serde_json",
  "thiserror",

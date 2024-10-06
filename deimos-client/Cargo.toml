@@ -19,6 +19,7 @@ thiserror = "1.0"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
+mime = { workspace = true }
 
 [dependencies.iced]
 version = "0.13"
