@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use container::CachedContainer;
 use deimos_shared::{DeimosServiceClient, QueryContainersRequest};
@@ -13,7 +13,7 @@ pub mod container;
 pub struct Context {
     state: ContextState,
     api: RwLock<DeimosServiceClient<Channel>>,
-    containers: Vec<Arc<CachedContainer>>,
+    containers: RwLock<HashMap<String, Arc<CachedContainer>>>,
 }
 
 /// Persistent state kept for the [Context]'s connection
@@ -38,21 +38,13 @@ impl Context {
             )
         );
 
-        let containers = Vec::new();
+        let containers = RwLock::new(HashMap::new());
 
         Self {
             state,
             api,
             containers,
         }
-    }
-    
-    /// Get an iterator over the currently cached containers
-    pub fn containers(&self) -> impl Iterator<Item = Arc<CachedContainer>> + '_ {
-        self
-            .containers
-            .iter()
-            .cloned()
     }
 
         

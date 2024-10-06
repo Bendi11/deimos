@@ -4,7 +4,7 @@ use iced::{widget::{svg, Text}, Length, Task};
 
 use crate::context::Context;
 
-use super::{style::{Button, Element, Svg, Theme}, DeimosView};
+use super::{style::{Button, Element, Svg}, DeimosView};
 
 
 #[derive(Debug)]
