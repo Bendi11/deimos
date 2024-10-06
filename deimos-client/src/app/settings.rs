@@ -1,56 +1,57 @@
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use http::Uri;
-use iced::{alignment::Horizontal, widget::{svg, Space, Text}, Length, Pixels, Task};
+use iced::{alignment::Horizontal, widget::{svg, Space, Text}, Length, Padding, Pixels, Task};
+use iced_aw::{time_picker::Time, TimePicker, TypedInput};
 
 use crate::context::{Context, ContextSettings};
 
 use super::{style::{Button, Column, Container, Element, Svg, TextInput}, DeimosView};
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Settings {
-    ctx: Arc<Context>,
-    edited_uri: String,
-    icon: svg::Handle,
+    pub edited: ContextSettings,
 }
 
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
-    UpdatedServerUri(String),
+    UpdatedServerUri(Uri),
+    UpdatedRequestTimeout(u64),
 }
 
 impl Settings {
     const ICON_SVG: &[u8] = include_bytes!("../../assets/settings.svg");
-
-    pub fn new(ctx: Arc<Context>) -> Self {
+    
+    /// Start a new settings editor given the current context's settings
+    pub fn new(edited: ContextSettings) -> Self {
         Self {
-            edited_uri: ctx.settings().server_uri.to_string(),
-            ctx,
-            icon: svg::Handle::from_memory(Self::ICON_SVG)
+            edited,
         }
-    }
-
-    pub fn icon(&self) -> Element<DeimosView> {
-        Button::new(
-            Svg::new(self.icon.clone())
-                .class((super::style::orbit::MERCURY[1], super::style::orbit::SOL[0]))
-                .width(Length::Shrink)
-        )
-            .on_press(DeimosView::Settings)
-            .into()
     }
 
     pub fn view(&self) -> Element<SettingsMessage> {
         let column = Column::new()
-            .align_x(Horizontal::Center)
-            .push(Space::new(Length::Fill, Length::Fixed(30f32)))
-            .push(Text::new("Server URI"))
-            .push(
-                TextInput::new("", &self.edited_uri)
-                    .on_input(|txt| SettingsMessage::UpdatedServerUri(txt))
+            .padding(Padding::default()
+                .top(30f32)
             )
-            .max_width(Pixels(256f32));
+            .align_x(Horizontal::Center)
+            .spacing(16f32)
+            .max_width(Pixels(256f32))
+            .push(Column::new()
+                .push(Text::new("Server URI"))
+                .push(TypedInput::new("URL", &self.edited.server_uri)
+                    .on_input(SettingsMessage::UpdatedServerUri)
+                    .width(Length::Fill)
+                )
+            )
+            .push(Column::new()
+                .push(Text::new("gRPC Request Timeout"))
+                .push(TypedInput::new("Timeout", &self.edited.request_timeout.as_secs())
+                    .on_input(SettingsMessage::UpdatedRequestTimeout)
+                    .width(Length::Fill)
+                )
+            );
         
         Container::new(column)
             .center_x(Length::FillPortion(3))
@@ -60,9 +61,13 @@ impl Settings {
     pub fn update(&mut self, msg: SettingsMessage) -> Task<SettingsMessage> {
         match msg {
             SettingsMessage::UpdatedServerUri(uri) => {
-                self.edited_uri = uri;
-                ().into()
+                self.edited.server_uri = uri;
+            },
+            SettingsMessage::UpdatedRequestTimeout(timeout) => {
+                self.edited.request_timeout = Duration::from_secs(timeout);
             }
         }
+
+        ().into()
     }
 }

@@ -29,7 +29,7 @@ impl Context {
     /// Synchronize containers from a received list of container data from the server
     pub async fn synchronize_containers(self: Arc<Self>) {
         let request = QueryContainersRequest {
-            updated_since: self.state.last_sync.map(|dt| dt.timestamp()),
+            updated_since: self.state.read().await.last_sync.map(|dt| dt.timestamp()),
         };
         
         let list = {
