@@ -1,25 +1,18 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use super::{DeimosApplication, DeimosApplicationState};
+use super::{Context, ContextState};
 
 
-impl DeimosApplication {
-    pub(super) fn load_config() -> Result<DeimosApplicationState, LoadStateError> {
-        let mut args = std::env::args()
-            .collect::<Vec<_>>();
+impl Context {
+    pub const STATE_FILE_NAME: &str = "state.json";
+    
+    /// Load application context state from the local cache directory, or create a default one
+    pub fn load_state() -> Result<ContextState, LoadStateError> {
+        let config_dir = Self::cache_directory(); 
 
-        let config_dir = if args.len() == 2 {
-            PathBuf::from(args.pop().unwrap())
-        } else {
-            match dirs::config_local_dir() {
-                Some(dir) => dir.join(DeimosApplication::CONFIG_DIR_NAME),
-                None => Path::new("./").join(DeimosApplication::CONFIG_DIR_NAME)
-            }
-        };
-
-        let config_path = config_dir.join(DeimosApplication::CONFIG_FILE_NAME);
+        let config_path = config_dir.join(Self::STATE_FILE_NAME);
         match std::fs::File::open(&config_path) {
-            Ok(rdr) => Ok(serde_json::from_reader::<_, DeimosApplicationState>(rdr)
+            Ok(rdr) => Ok(serde_json::from_reader::<_, ContextState>(rdr)
                     .map_err(|e| LoadStateError { config_path: config_path.clone(), kind: LoadStateErrorKind::Parse(e)})?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 tracing::warn!("Failed to load config file from {}: creating a default", config_path.display());
@@ -30,7 +23,7 @@ impl DeimosApplication {
                     }
                 }
 
-                let config = DeimosApplicationState::default();
+                let config = ContextState::default();
                 
                 let file = std::fs::File::create(&config_path)
                         .map_err(|e| LoadStateError { config_path: config_path.clone(), kind: LoadStateErrorKind::FailedToCreateDefault(e) })?;

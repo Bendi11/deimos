@@ -1,6 +1,6 @@
 use iced::{widget::container, Length, Task};
 
-use super::{style::{Container, Element, Theme}, DeimosApplication, DeimosApplicationLoadError, DeimosMessage};
+use super::{style::{Container, Element, Theme}, DeimosApplication, DeimosMessage};
 
 
 
@@ -11,7 +11,7 @@ pub struct LoadWrapper {
 
 #[derive(Debug)]
 pub enum LoaderMessage {
-    Loaded(Result<DeimosApplication, DeimosApplicationLoadError>),
+    Loaded(DeimosApplication),
     Application(DeimosMessage),
 }
 
@@ -47,14 +47,7 @@ impl LoadWrapper {
             },
             None => {
                 if let LoaderMessage::Loaded(app) = msg {
-                    match app {
-                        Ok(app) => {
-                            self.state = Some(app);
-                        },
-                        Err(e) => {
-                            tracing::error!("{e}");
-                        }
-                    }
+                    self.state = Some(app);
                 }
 
                 Task::none()

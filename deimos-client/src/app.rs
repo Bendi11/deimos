@@ -1,7 +1,5 @@
 use std::{process::ExitCode, sync::{Arc, Weak}};
 
-use config::LoadStateError;
-use deimos_shared::ContainerBrief;
 use iced::{alignment::Horizontal, widget::{container, svg, Space, Svg}, Length, Padding, Pixels, Size, Task};
 use loader::{LoaderMessage, LoadWrapper};
 use settings::{Settings, SettingsMessage};
@@ -10,7 +8,6 @@ use style::{Column, Container, Element, Row, Rule, Text, Theme};
 use crate::context::{container::CachedContainer, Context, ContextState};
 
 mod loader;
-mod config;
 mod settings;
 pub mod style;
 
@@ -20,12 +17,6 @@ pub struct DeimosApplication {
     icon: svg::Handle,
     settings: Settings,
     view: DeimosView,
-}
-
-/// Persistent state maintained for the whole application
-#[derive(Default, serde::Deserialize, serde::Serialize)]
-pub struct DeimosApplicationState {
-    pub context: ContextState,
 }
 
 #[derive(Debug, Clone)]
@@ -43,30 +34,23 @@ pub enum DeimosMessage {
     RecvContainers,
 }
 
-impl DeimosApplication {
-    pub const CONFIG_DIR_NAME: &str = "deimos";
-    pub const CONFIG_FILE_NAME: &str = "state.json";
-}
 
 impl DeimosApplication {
     /// Load application state from a save file and return the application
-    async fn load() -> Result<Self, DeimosApplicationLoadError>  {
-        let state = Self::load_config()?;
-        let ctx = Context::new(state.context).await;
+    async fn load() -> Self {
+        let ctx = Context::new().await;
 
         let settings = Settings::new(ctx.clone());
         let view = DeimosView::Empty;
         
         let icon = svg::Handle::from_memory(include_bytes!("../assets/mars-deimos.svg"));
 
-        Ok(
-            Self {
-                ctx,
-                icon,
-                settings,
-                view,
-            }
-        )
+        Self {
+            ctx,
+            icon,
+            settings,
+            view,
+        }
     }
 
     pub fn run() -> ExitCode {
@@ -145,10 +129,4 @@ impl DeimosApplication {
             )
             .into()
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DeimosApplicationLoadError {
-    #[error("Failed to load application state: {0}")]
-    LoadState(#[from] LoadStateError),
 }

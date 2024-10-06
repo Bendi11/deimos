@@ -9,6 +9,7 @@ use tonic::{transport::Channel, Code};
 use tonic::Status;
 
 pub mod container;
+pub mod load;
 
 /// Context shared across the application used to perform API requests on the remote
 #[derive(Debug)]
@@ -34,7 +35,15 @@ impl Context {
 
     /// Create a new lazy API client, which will not attempt a connection until the first API call
     /// is made
-    pub async fn new(state: ContextState) -> Arc<Self> {
+    pub async fn new() -> Arc<Self> {
+        let state = match Self::load_state() {
+            Ok(state) => state,
+            Err(e) => {
+                tracing::error!("Failed to load application state: {e}");
+                ContextState::default()
+            }
+        };
+
         let api = Mutex::new(
             DeimosServiceClient::new(
                 Channel::builder(state.server_uri.clone())
