@@ -14,7 +14,8 @@ const CONFIG_PATH: &str = "./deimos.toml";
 async fn main() -> ExitCode {
     let filter = tracing_subscriber::filter::Targets::new()
         .with_target("bollard", LevelFilter::ERROR)
-        .with_target("deimosd", LevelFilter::TRACE);
+        .with_target("deimosd", LevelFilter::TRACE)
+        .with_target("deimos_shared", LevelFilter::TRACE);
 
     let subscriber = FmtSubscriber::builder()
         .compact()
@@ -30,18 +31,24 @@ async fn main() -> ExitCode {
     let config_buf = match util::load_check_permissions(CONFIG_PATH).await {
         Ok(v) => v,
         Err(e) => {
-            tracing::error!("Failed to load config file {CONFIG_PATH}: {e}");
+            tracing::error!("Failed to open config file {CONFIG_PATH}: {e}");
             return ExitCode::FAILURE;
         }
     };
 
-    let config_str = String::from_utf8_lossy(&config_buf);
+    let Ok(config_str) = String::from_utf8(config_buf) else {
+        tracing::error!("Cannot decode config file '{}' as UTF-8", CONFIG_PATH);
+        return ExitCode::FAILURE
+    };
 
     let toml_de = toml::Deserializer::new(&config_str);
     let conf = match DeimosConfig::deserialize(toml_de) {
         Ok(v) => v,
         Err(e) => {
-            tracing::error!("Failed to parse config file at {CONFIG_PATH}: {e}");
+            tracing::error!(
+                "Failed to parse config file at {CONFIG_PATH}: {}: {:?}", e.message(), e.span()
+                
+            );
             return ExitCode::FAILURE;
         }
     };
