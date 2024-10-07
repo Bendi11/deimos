@@ -38,6 +38,11 @@ pub struct ContextState {
 impl Context {
     pub const CACHE_DIR_NAME: &str = "deimos";
 
+    pub async fn cleanup(self: Arc<Self>) {
+        self.save_state().await;
+        self.save_cached_containers().await;
+    }
+
     /// Create a new lazy API client, which will not attempt a connection until the first API call
     /// is made
     pub async fn new() -> Arc<Self> {
@@ -110,11 +115,5 @@ impl Default for ContextState {
             },
             last_sync: None,
         }
-    }
-}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        self.save_state();
     }
 }

@@ -63,9 +63,7 @@ pub struct ContainerStatusStreamer {
 
 impl Deimos {
     pub async fn serve_api(self: Arc<Self>, cancel: CancellationToken) -> Result<(), ApiInitError> {
-        tracing::error!("Beginning gRPC server");
-
-        let mut ca_cert_pem = util::load_check_permissions(&self.api.config.certificate)
+        /*let mut ca_cert_pem = util::load_check_permissions(&self.api.config.certificate)
             .await
             .map_err(|e| ApiInitError::LoadSensitiveFile(self.api.config.certificate.clone(), e))?;
 
@@ -75,23 +73,23 @@ impl Deimos {
 
         let mut client_ca_root_pem = util::load_check_permissions(&self.api.config.client_ca_root)
             .await
-            .map_err(|e| ApiInitError::LoadSensitiveFile(self.api.config.client_ca_root.clone(), e))?;
+            .map_err(|e| ApiInitError::LoadSensitiveFile(self.api.config.client_ca_root.clone(), e))?;*/
 
 
         let server = Server::builder()
             .timeout(self.api.config.timeout)
-            .tls_config(
+            /*.tls_config(
                 ServerTlsConfig::new()
                     .client_auth_optional(true)
                     .identity(Identity::from_pem(&ca_cert_pem, &privkey_pem))
                     .client_ca_root(Certificate::from_pem(&client_ca_root_pem))
-            );
+            )*/;
 
-        ca_cert_pem.zeroize();
+        /*ca_cert_pem.zeroize();
         privkey_pem.zeroize();
-        client_ca_root_pem.zeroize();
+        client_ca_root_pem.zeroize();*/
 
-        match server {
+        match Ok(server) {
             Ok(mut server) => if let Err(e) = server
                 .add_service(DeimosServiceServer::from_arc(self.clone()))
                 .serve_with_shutdown(self.api.config.bind, cancel.cancelled())
@@ -128,7 +126,14 @@ impl DeimosService for Deimos {
     }
 
     async fn get_container_image(self: Arc<Self>, _req: tonic::Request<ContainerImagesRequest>) -> Result<tonic::Response<ContainerImagesResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("unimplemented"))
+        Ok(
+            tonic::Response::new(
+                ContainerImagesResponse {
+                    banner: None,
+                    icon: None
+                }
+            )
+        )
     }
 
     async fn container_status(self: Arc<Self>, _: tonic::Request<ContainerStatusRequest>) -> Result<tonic::Response<ContainerStatusResponse>, tonic::Status> {

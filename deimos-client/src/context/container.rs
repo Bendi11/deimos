@@ -11,6 +11,7 @@ use deimos_shared::{
 };
 use iced::widget::image;
 use mime::Mime;
+use tokio::io::AsyncWriteExt;
 
 use super::Context;
 
@@ -55,10 +56,23 @@ impl Context {
             self.synchronize_container_from_brief(item).await;
         }
     }
+    
+    /// Save all cached container state to the local cache directory
+    pub async fn save_cached_containers(self: Arc<Self>) {
+        let cache_dir = Self::cache_directory();
+
+        for (id, container) in self.containers.read().await.iter() {
+            tracing::trace!("Saving container {}", id);
+            if let Err(e) = container.save(&cache_dir).await {
+                tracing::error!("Failed to save container {}: {}", id, e);
+            }
+        }
+    }
 
     /// Check if the received container is already cached at its newest version, and request full
     /// container data including images if it is not
     async fn synchronize_container_from_brief(&self, brief: ContainerBrief) {
+        tracing::trace!("Synchronizing container {}", brief.id);
         let Some(updated) = DateTime::from_timestamp(brief.updated, 0) else {
             tracing::warn!(
                 "Failed to create timestamp from container brief timestamp {}",
@@ -121,13 +135,17 @@ impl Context {
             name: brief.title,
             last_update: DateTime::from_timestamp(brief.updated, 0).unwrap_or_default(),
         };
+        
 
+        let id = data.id.clone();
         let container = CachedContainer { data, banner, icon };
 
         self.containers
             .write()
             .await
-            .insert(container.data.id.clone(), Arc::new(container));
+            .insert(id.clone(), Arc::new(container));
+
+        tracing::info!("Finished full sync for container {}", id);
     }
 
     /// Attempt to load all containers from the given local cache directory
@@ -221,6 +239,21 @@ impl CachedContainerData {
         })?;
         serde_json::from_str::<CachedContainerData>(&data_str).map_err(Into::into)
     }
+    
+    /// Write cached container metadata to a local cache directory
+    async fn save(&self, directory: &Path) -> Result<(), CachedContainerSaveError> {
+        let meta_path = directory.join(CachedContainer::METADATA_FILE);
+
+        let mut file = tokio::fs::File::create(&meta_path).await.map_err(|err| CachedContainerSaveError::IO {
+            path: meta_path.clone(),
+            err,
+        })?;
+        
+        let bytes = serde_json::to_vec(self)?;
+        file.write_all(&bytes).await.map_err(|err| CachedContainerSaveError::IO { path: meta_path, err })?;
+
+        Ok(())
+    }
 }
 
 impl CachedContainer {
@@ -245,9 +278,14 @@ impl CachedContainer {
     }
 
     /// Save all state to the filesystem, creating cache directories as required
-    async fn save(&self, cache_dir: &Path) -> Result<(), CachedContainerLoadError> {
+    async fn save(&self, cache_dir: &Path) -> Result<(), CachedContainerSaveError> {
         let dir = self.directory(cache_dir);
+        if let Err(e) = tokio::fs::create_dir(&dir).await {
+            tracing::warn!("Failed to create directory '{}' for container {}: {}", dir.display(), self.data.id, e);
+        }
+
         tracing::trace!("Saving container {} to {}", self.data.id, dir.display());
+        self.data.save(&dir).await?;
 
         Ok(())
     }
@@ -280,4 +318,16 @@ pub enum CachedContainerLoadError {
     },
     #[error("Failed to parse cached container state: {0}")]
     Decode(#[from] serde_json::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CachedContainerSaveError {
+    #[error("I/O operation on file {}: {}", path.display(), err)]
+    IO {
+        path: PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+    #[error("Failed to serialize container state: {0}")]
+    Encode(#[from] serde_json::Error),
 }

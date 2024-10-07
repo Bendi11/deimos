@@ -187,14 +187,21 @@ impl DeimosApplication {
 
 impl Drop for DeimosApplication {
     fn drop(&mut self) {
-        if let DeimosView::Settings(ref s) = self.view {
+        if let Ok(rt) = tokio::runtime::Runtime::new() {
             let ctx = self.ctx.clone();
-            let settings = s.edited.clone();
-            if let Ok(rt) = tokio::runtime::Runtime::new() {
-                rt.block_on(async move {
-                    ctx.reload_settings(settings).await;
-                })
-            }
+            let settings = match &self.view {
+                DeimosView::Settings(s) => Some(s.edited.clone()),
+                _ => None,
+            };
+
+            rt.block_on(async move {
+                if let Some(settings) = settings {
+                    ctx.clone().reload_settings(settings).await;
+                }
+
+                ctx.cleanup().await;
+            })
         }
+        
     }
 }

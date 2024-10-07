@@ -71,10 +71,24 @@ impl Deimos {
                 }
             };
 
-            if let Some(()) = close.recv().await {
-                tracing::info!("Got SIGINT, shutting down deimosd");
-                cancel.cancel();
-            } 
+            let mut term = match tokio::signal::unix::signal(SignalKind::terminate()) {
+                Ok(sig) => sig,
+                Err(e) => {
+                    tracing::error!("Failed to create SIGTERM handler: {e}");
+                    return ExitCode::FAILURE
+                }
+            };
+
+            tokio::select! {
+                _ = close.recv() => {
+                    tracing::info!("Got SIGINT");
+                },
+                _ = term.recv() => {
+                    tracing::info!("Got SIGTERM");
+                },
+            };
+            
+            cancel.cancel();
         }
 
         let _ = tokio::join! {
