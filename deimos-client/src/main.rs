@@ -10,7 +10,7 @@ fn main() -> ExitCode {
     let filter = tracing_subscriber::filter::Targets::new()
         .with_target("deimos_client", LevelFilter::TRACE)
         .with_target("iced", LevelFilter::WARN)
-        .with_target("tonic", LevelFilter::WARN);
+        .with_target("tonic", LevelFilter::INFO);
 
     let subscriber = FmtSubscriber::builder()
         .with_max_level(LevelFilter::TRACE)

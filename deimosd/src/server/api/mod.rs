@@ -2,6 +2,7 @@ use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll, time:
 
 use deimos_shared::{util, ContainerBrief, ContainerImagesRequest, ContainerImagesResponse, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
+use igd_next::PortMappingProtocol;
 use tokio::sync::{broadcast, Mutex};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
@@ -9,11 +10,14 @@ use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use tonic::transport::Identity;
 use zeroize::Zeroize;
 
+use super::upnp::{Upnp, UpnpLease};
 use super::Deimos;
 
 /// A connection to a remote client, with references to state required to serve RPC requests
 pub struct ApiState {
     pub config: ApiConfig,
+    /// Address leased for the API
+    pub lease: Option<UpnpLease>,
 }
 
 /// Configuration used to initialize and inform the Deimos API service
@@ -33,10 +37,18 @@ pub struct ApiConfig {
 impl ApiState {
     /// Load the Deimos API service configuration and store a handle to the local Docker instance
     /// to manage containers
-    pub async fn new(config: ApiConfig) -> Result<Self, ApiInitError> {
+    pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
+        let lease = match config.upnp {
+            true => upnp.lease(
+                std::iter::once((config.bind.port(), PortMappingProtocol::TCP))
+            ).await,
+            false => None,
+        };
+
         Ok(
             Self {
                 config,
+                lease,
             }
         )
     }
@@ -66,6 +78,7 @@ impl Deimos {
             .timeout(self.api.config.timeout)
             .tls_config(
                 ServerTlsConfig::new()
+                    .client_auth_optional(true)
                     .identity(Identity::from_pem(&ca_cert_pem, &privkey_pem))
                     .client_ca_root(Certificate::from_pem(&client_ca_root_pem))
             );

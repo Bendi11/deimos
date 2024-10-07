@@ -103,9 +103,14 @@ impl DeimosApplication {
             DeimosMessage::ContainerUpdate => ().into(),
             DeimosMessage::BeginNavigateSettings => {
                 let ctx = self.ctx.clone();
+                Task::future(async move {
+                    ctx.synchronize_containers().await;
+                }).discard()
+                /*
+
                 Task::perform(async move { Settings::new(ctx.settings().await) }, |s| {
                     DeimosMessage::Navigate(DeimosView::Settings(s))
-                })
+                })*/
             }
         }
     }

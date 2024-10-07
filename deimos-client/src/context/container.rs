@@ -40,6 +40,8 @@ impl Context {
 
         let list = {
             let mut api = self.api.lock().await;
+            tracing::trace!("Requesting container data...");
+
             match api.query_containers(request).await {
                 Ok(resp) => resp.into_inner().containers,
                 Err(e) => {
