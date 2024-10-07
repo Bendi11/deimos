@@ -46,10 +46,7 @@ async fn main() -> ExitCode {
     let conf = match DeimosConfig::deserialize(toml_de) {
         Ok(v) => v,
         Err(e) => {
-            tracing::error!(
-                "Failed to parse config file at {CONFIG_PATH}: {}: {:?}", e.message(), e.span()
-                
-            );
+            tracing::error!("Failed to parse config file at {CONFIG_PATH}: {e}");
             return ExitCode::FAILURE;
         }
     };

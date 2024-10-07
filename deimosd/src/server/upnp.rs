@@ -34,7 +34,7 @@ impl Upnp {
         )
     }
 
-    pub async fn lease(&self, ports: impl Iterator<Item = (u16, PortMappingProtocol)>) -> Option<UpnpLease> {
+    pub async fn lease(&self, ports: impl Iterator<Item = (u16, PortMappingProtocol)>) -> UpnpLease {
         let gateway = self.gateway.clone();
         let ports = ports.collect::<Vec<_>>();
         let local_ip = self.local_ip;
@@ -62,10 +62,7 @@ impl Upnp {
             };
         };
 
-        tokio::task::spawn(task)
-            .await
-            .ok()
-            .map(UpnpLease)
+        UpnpLease(tokio::task::spawn(task))
     }
 }
 

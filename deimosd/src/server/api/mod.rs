@@ -39,9 +39,11 @@ impl ApiState {
     /// to manage containers
     pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
         let lease = match config.upnp {
-            true => upnp.lease(
-                std::iter::once((config.bind.port(), PortMappingProtocol::TCP))
-            ).await,
+            true => Some(
+                    upnp.lease(
+                    std::iter::once((config.bind.port(), PortMappingProtocol::TCP))
+                ).await
+            ),
             false => None,
         };
 
@@ -61,6 +63,8 @@ pub struct ContainerStatusStreamer {
 
 impl Deimos {
     pub async fn serve_api(self: Arc<Self>, cancel: CancellationToken) -> Result<(), ApiInitError> {
+        tracing::error!("Beginning gRPC server");
+
         let mut ca_cert_pem = util::load_check_permissions(&self.api.config.certificate)
             .await
             .map_err(|e| ApiInitError::LoadSensitiveFile(self.api.config.certificate.clone(), e))?;
