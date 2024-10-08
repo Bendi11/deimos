@@ -8,8 +8,8 @@ use iced::{
     Length, Task,
 };
 use loader::{LoadWrapper, LoaderMessage};
-use settings::{Settings, SettingsMessage};
-use sidebar::{Sidebar, SidebarMessage};
+use settings::{Settings, SettingsMessage, SettingsMessageInternal};
+use sidebar::{Sidebar, SidebarEntry, SidebarMessage};
 use style::{
     orbit, Button, Column, Container, Element, Row, Theme,
 };
@@ -26,20 +26,21 @@ pub struct DeimosApplication {
     ctx: Arc<Context>,
     settings_icon: svg::Handle,
     sidebar: Sidebar,
+    settings: Settings,
     view: DeimosView,
 }
 
 #[derive(Debug, Clone)]
 pub enum DeimosView {
     Empty,
-    Settings(Settings),
-    Server(Weak<CachedContainer>),
+    Settings,
+    Server,
 }
 
 #[derive(Debug, Clone)]
 pub enum DeimosMessage {
-    BeginNavigateSettings,
-    Navigate(DeimosView),
+    NavigateSettings,
+    Refreshed(Vec<Arc<CachedContainer>>),
     Settings(SettingsMessage),
     Sidebar(SidebarMessage),
 }
@@ -51,12 +52,13 @@ impl DeimosApplication {
         let view = DeimosView::Empty;
 
         let settings_icon = svg::Handle::from_memory(include_bytes!("../assets/settings.svg"));
-
-        let sidebar = Sidebar::new(ctx.clone());
+        let sidebar = Sidebar::new();
+        let settings = Settings::new();
 
         Self {
             ctx,
             sidebar,
+            settings,
             settings_icon,
             view,
         }
@@ -83,34 +85,31 @@ impl DeimosApplication {
 
     fn update(&mut self, msg: DeimosMessage) -> Task<DeimosMessage> {
         match msg {
-            DeimosMessage::Navigate(view) => {
-                let ctx = self.ctx.clone();
-                match std::mem::replace(&mut self.view, view) {
-                    DeimosView::Settings(s) => Task::future(async move {
-                        ctx.reload_settings(s.edited).await;
-                    })
-                    .discard(),
-                    _ => iced::Task::none(),
-                }
-            }
-            DeimosMessage::Settings(msg) => {
-                if let DeimosView::Settings(ref mut settings) = self.view {
-                    settings.update(msg).map(DeimosMessage::Settings)
-                } else {
-                    ().into()
-                }
+            DeimosMessage::Refreshed(data) => {
+                let entries = data.iter().map(|c| SidebarEntry { name: Arc::from(c.data.name.clone()), running: false} ).collect();
+                self.sidebar.update(SidebarMessage::ContainerEntries(entries))
+                    .map(DeimosMessage::Sidebar)
             },
-            DeimosMessage::Sidebar(m) => self.sidebar.update(m).map(DeimosMessage::Sidebar),
-            DeimosMessage::BeginNavigateSettings => {
-                let ctx = self.ctx.clone();
-                Task::future(async move {
-                    ctx.synchronize_containers().await;
-                }).discard()
-                /*
+            DeimosMessage::NavigateSettings => {
+                self.view = DeimosView::Settings;
 
-                Task::perform(async move { Settings::new(ctx.settings().await) }, |s| {
-                    DeimosMessage::Navigate(DeimosView::Settings(s))
-                })*/
+                let ctx = self.ctx.clone();
+                Task::perform(
+                    async move {
+                        ctx.settings().await
+                    },
+                    |s| DeimosMessage::Settings(SettingsMessage::Enter(s)))
+            },
+            DeimosMessage::Settings(msg) => self.settings.update(msg).map(DeimosMessage::Settings),
+            DeimosMessage::Sidebar(m) => match m {
+                SidebarMessage::Refresh => {
+                    let ctx = self.ctx.clone();
+                    Task::perform(
+                        async move { ctx.containers().await },
+                        DeimosMessage::Refreshed
+                    )
+                }
+                other => self.sidebar.update(other).map(DeimosMessage::Sidebar),
             }
         }
     }
@@ -124,7 +123,7 @@ impl DeimosApplication {
                             .class((orbit::MERCURY[1], orbit::SOL[0]))
                             .width(Length::Shrink),
                     )
-                    .on_press(DeimosMessage::BeginNavigateSettings),
+                    .on_press(DeimosMessage::NavigateSettings),
                 )
                 .align_right(Length::Fill)
                 .height(Length::Fixed(45f32)),
@@ -137,8 +136,7 @@ impl DeimosApplication {
         Row::new()
             .push(self.sidebar.view().map(DeimosMessage::Sidebar))
             .push(match self.view {
-                DeimosView::Empty => self.empty_view(),
-                DeimosView::Settings(ref s) => s.view().map(DeimosMessage::Settings),
+                DeimosView::Settings => self.settings.view().map(DeimosMessage::Settings),
                 _ => self.empty_view(),
             })
             .into()
@@ -149,10 +147,7 @@ impl Drop for DeimosApplication {
     fn drop(&mut self) {
         if let Ok(rt) = tokio::runtime::Runtime::new() {
             let ctx = self.ctx.clone();
-            let settings = match &self.view {
-                DeimosView::Settings(s) => Some(s.edited.clone()),
-                _ => None,
-            };
+            let settings = self.settings.edited();
 
             rt.block_on(async move {
                 if let Some(settings) = settings {

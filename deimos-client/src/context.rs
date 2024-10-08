@@ -92,6 +92,10 @@ impl Context {
         *old_state = state;
     }
 
+    pub async fn containers(self: Arc<Self>) -> Vec<Arc<CachedContainer>> {
+        self.containers.read().await.values().cloned().collect()
+    }
+
     /// Get the settings applied to this context
     pub async fn settings(&self) -> ContextSettings {
         self.state.read().await.settings.clone()

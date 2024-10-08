@@ -2,6 +2,7 @@ use iced::{border::Radius, widget::container, Background, Border, Color, Shadow,
 
 use super::Theme;
 
+#[derive(Default, Clone, Copy)]
 pub struct ContainerClass {
     pub radius: Radius,
     pub background: Option<Background>,
@@ -12,11 +13,7 @@ impl container::Catalog for Theme {
     type Class<'a> = ContainerClass;
 
     fn default<'a>() -> Self::Class<'a> {
-        ContainerClass {
-            radius: Default::default(),
-            background: None,
-            shadow: None,
-        }
+        ContainerClass::default()
     }
 
     fn style(&self, class: &Self::Class<'_>) -> container::Style {
