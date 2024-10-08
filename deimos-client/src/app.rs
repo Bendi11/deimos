@@ -4,29 +4,28 @@ use std::{
 };
 
 use iced::{
-    alignment::Horizontal,
-    border::Radius,
-    futures::FutureExt,
     widget::{svg, Svg},
-    Background, Length, Padding, Shadow, Task, Vector,
+    Length, Task,
 };
 use loader::{LoadWrapper, LoaderMessage};
 use settings::{Settings, SettingsMessage};
+use sidebar::{Sidebar, SidebarMessage};
 use style::{
-    container::ContainerClass, orbit, Button, Column, Container, Element, Row, Text, Theme,
+    orbit, Button, Column, Container, Element, Row, Theme,
 };
 
 use crate::context::{container::CachedContainer, Context};
 
 mod loader;
 mod settings;
-pub mod style;
+mod sidebar;
+mod style;
 
 #[derive(Debug)]
 pub struct DeimosApplication {
     ctx: Arc<Context>,
-    icon: svg::Handle,
     settings_icon: svg::Handle,
+    sidebar: Sidebar,
     view: DeimosView,
 }
 
@@ -42,7 +41,7 @@ pub enum DeimosMessage {
     BeginNavigateSettings,
     Navigate(DeimosView),
     Settings(SettingsMessage),
-    ContainerUpdate,
+    Sidebar(SidebarMessage),
 }
 
 impl DeimosApplication {
@@ -51,12 +50,13 @@ impl DeimosApplication {
         let ctx = Context::new().await;
         let view = DeimosView::Empty;
 
-        let icon = svg::Handle::from_memory(include_bytes!("../assets/mars-deimos.svg"));
         let settings_icon = svg::Handle::from_memory(include_bytes!("../assets/settings.svg"));
+
+        let sidebar = Sidebar::new(ctx.clone());
 
         Self {
             ctx,
-            icon,
+            sidebar,
             settings_icon,
             view,
         }
@@ -99,8 +99,8 @@ impl DeimosApplication {
                 } else {
                     ().into()
                 }
-            }
-            DeimosMessage::ContainerUpdate => ().into(),
+            },
+            DeimosMessage::Sidebar(m) => self.sidebar.update(m).map(DeimosMessage::Sidebar),
             DeimosMessage::BeginNavigateSettings => {
                 let ctx = self.ctx.clone();
                 Task::future(async move {
@@ -129,53 +129,13 @@ impl DeimosApplication {
                 .align_right(Length::Fill)
                 .height(Length::Fixed(45f32)),
             )
-            .push(Text::new("Main view"))
             .width(Length::FillPortion(3))
             .into()
     }
 
     fn view(&self) -> Element<DeimosMessage> {
-        let header = Row::new()
-            .push(
-                Svg::new(self.icon.clone())
-                    .class(orbit::MARS[1])
-                    .height(64f32)
-                    .width(Length::FillPortion(1)),
-            )
-            .push(
-                Column::new()
-                    .push(
-                        Text::new("Deimos")
-                            .size(30f32)
-                            .wrapping(iced::widget::text::Wrapping::None)
-                            .center(),
-                    )
-                    .align_x(Horizontal::Center)
-                    .width(Length::FillPortion(1)),
-            )
-            .padding(Padding::default().top(16f32).left(16f32).right(16f32))
-            .height(128);
-
         Row::new()
-            .push(
-                Container::new(Column::new().push(header))
-                    .class(ContainerClass {
-                        radius: Radius {
-                            top_left: 0f32,
-                            top_right: 5f32,
-                            bottom_right: 5f32,
-                            bottom_left: 0f32,
-                        },
-                        background: Some(Background::Color(orbit::NIGHT[1])),
-                        shadow: Some(Shadow {
-                            color: orbit::NIGHT[3],
-                            offset: Vector::new(1f32, 0f32),
-                            blur_radius: 16f32,
-                        }),
-                    })
-                    .width(Length::Fixed(256f32))
-                    .height(Length::Fill),
-            )
+            .push(self.sidebar.view().map(DeimosMessage::Sidebar))
             .push(match self.view {
                 DeimosView::Empty => self.empty_view(),
                 DeimosView::Settings(ref s) => s.view().map(DeimosMessage::Settings),
