@@ -36,7 +36,7 @@ pub enum DeimosView {
 
 #[derive(Debug, Clone)]
 pub enum DeimosMessage {
-    Close(iced::window::Id),
+    Close,
     Navigate(DeimosView),
     Context(ContextMessage),
     Settings(SettingsMessage),
@@ -85,7 +85,7 @@ impl DeimosApplication {
 
     fn update(&mut self, msg: DeimosMessage) -> Task<DeimosMessage> {
         match msg {
-            DeimosMessage::Close(_) => {
+            DeimosMessage::Close => {
                 self.ctx.cleanup();
                 iced::exit()
             },
@@ -136,6 +136,6 @@ impl DeimosApplication {
     }
 
     fn subscription_window_event(_: &LoadWrapper) -> iced::Subscription<LoaderMessage> {
-        iced::window::close_requests().map(|id| LoaderMessage::Application(DeimosMessage::Close(id)))
+        iced::window::close_requests().map(|_| LoaderMessage::Application(DeimosMessage::Close))
     }
 }
