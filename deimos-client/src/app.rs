@@ -1,20 +1,17 @@
-use std::{
-    process::ExitCode,
-    sync::{Arc, Weak},
-};
+use std::process::ExitCode;
 
 use iced::{
     widget::{svg, Svg},
     Length, Task,
 };
 use loader::{LoadWrapper, LoaderMessage};
-use settings::{Settings, SettingsMessage, SettingsMessageInternal};
-use sidebar::{Sidebar, SidebarEntry, SidebarMessage};
+use settings::{Settings, SettingsMessage};
+use sidebar::{Sidebar, SidebarMessage};
 use style::{
     orbit, Button, Column, Container, Element, Row, Theme,
 };
 
-use crate::context::{container::CachedContainer, Context};
+use crate::context::{Context, ContextMessage};
 
 mod loader;
 mod settings;
@@ -23,7 +20,7 @@ mod style;
 
 #[derive(Debug)]
 pub struct DeimosApplication {
-    ctx: Arc<Context>,
+    ctx: Context,
     settings_icon: svg::Handle,
     sidebar: Sidebar,
     settings: Settings,
@@ -39,8 +36,8 @@ pub enum DeimosView {
 
 #[derive(Debug, Clone)]
 pub enum DeimosMessage {
-    NavigateSettings,
-    Refreshed(Vec<Arc<CachedContainer>>),
+    Navigate(DeimosView),
+    Context(ContextMessage),
     Settings(SettingsMessage),
     Sidebar(SidebarMessage),
 }
@@ -85,30 +82,14 @@ impl DeimosApplication {
 
     fn update(&mut self, msg: DeimosMessage) -> Task<DeimosMessage> {
         match msg {
-            DeimosMessage::Refreshed(data) => {
-                let entries = data.iter().map(|c| SidebarEntry { name: Arc::from(c.data.name.clone()), running: false} ).collect();
-                self.sidebar.update(SidebarMessage::ContainerEntries(entries))
-                    .map(DeimosMessage::Sidebar)
+            DeimosMessage::Navigate(view) => {
+                self.view = view;
+                iced::Task::none()
             },
-            DeimosMessage::NavigateSettings => {
-                self.view = DeimosView::Settings;
-
-                let ctx = self.ctx.clone();
-                Task::perform(
-                    async move {
-                        ctx.settings().await
-                    },
-                    |s| DeimosMessage::Settings(SettingsMessage::Enter(s)))
-            },
+            DeimosMessage::Context(msg) => self.ctx.update(msg).map(DeimosMessage::Context),
             DeimosMessage::Settings(msg) => self.settings.update(msg).map(DeimosMessage::Settings),
             DeimosMessage::Sidebar(m) => match m {
-                SidebarMessage::Refresh => {
-                    let ctx = self.ctx.clone();
-                    Task::perform(
-                        async move { ctx.containers().await },
-                        DeimosMessage::Refreshed
-                    )
-                }
+                SidebarMessage::Refresh => self.ctx.synchronize_from_server().map(DeimosMessage::Context),
                 other => self.sidebar.update(other).map(DeimosMessage::Sidebar),
             }
         }
@@ -123,7 +104,7 @@ impl DeimosApplication {
                             .class((orbit::MERCURY[1], orbit::SOL[0]))
                             .width(Length::Shrink),
                     )
-                    .on_press(DeimosMessage::NavigateSettings),
+                    .on_press(DeimosMessage::Navigate(DeimosView::Settings)),
                 )
                 .align_right(Length::Fill)
                 .height(Length::Fixed(45f32)),
@@ -134,29 +115,11 @@ impl DeimosApplication {
 
     fn view(&self) -> Element<DeimosMessage> {
         Row::new()
-            .push(self.sidebar.view().map(DeimosMessage::Sidebar))
+            .push(self.sidebar.view(&self.ctx).map(DeimosMessage::Sidebar))
             .push(match self.view {
                 DeimosView::Settings => self.settings.view().map(DeimosMessage::Settings),
                 _ => self.empty_view(),
             })
             .into()
-    }
-}
-
-impl Drop for DeimosApplication {
-    fn drop(&mut self) {
-        if let Ok(rt) = tokio::runtime::Runtime::new() {
-            let ctx = self.ctx.clone();
-            let settings = self.settings.edited();
-
-            rt.block_on(async move {
-                if let Some(settings) = settings {
-                    ctx.clone().reload_settings(settings).await;
-                }
-
-                ctx.cleanup().await;
-            })
-        }
-        
     }
 }

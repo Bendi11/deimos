@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use iced::{alignment::Horizontal, border::Radius, gradient::Linear, widget::svg, Background, ContentFit, Degrees, Gradient, Length, Padding, Radians, Shadow, Task, Vector};
 
-use crate::context::Context;
+use crate::context::{container::CachedContainer, Context};
 
 use super::style::{button::ButtonClass, container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text};
 
@@ -10,19 +10,11 @@ use super::style::{button::ButtonClass, container::ContainerClass, orbit, Button
 pub struct Sidebar {
     icon: svg::Handle,
     reload: svg::Handle,
-    container_entries: Vec<SidebarEntry>,
-}
-
-#[derive(Debug, Clone)]
-pub struct SidebarEntry {
-    pub name: Arc<str>,
-    pub running: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum SidebarMessage {
     Refresh,
-    ContainerEntries(Vec<SidebarEntry>),
 }
 
 impl Sidebar {
@@ -30,11 +22,10 @@ impl Sidebar {
         Self {
             icon: svg::Handle::from_memory(include_bytes!("../../assets/mars-deimos.svg")),
             reload: svg::Handle::from_memory(include_bytes!("../../assets/reload.svg")),
-            container_entries: Vec::new(),
         }
     }
 
-    pub fn view(&self) -> Element<SidebarMessage> {
+    pub fn view<'a>(&self, ctx: &'a Context) -> Element<'a, SidebarMessage> {
         let header = Row::new()
             .push(
                 Svg::new(self.icon.clone())
@@ -78,8 +69,8 @@ impl Sidebar {
             .spacing(16)
             .push(header);
 
-        for entry in &self.container_entries {
-            col = col.push(entry.view());
+        for (_, container) in ctx.containers.iter() {
+            col = col.push(Self::container_button(container));
         }
 
         Container::new(col)
@@ -104,17 +95,11 @@ impl Sidebar {
 
     pub fn update(&mut self, msg: SidebarMessage) -> Task<SidebarMessage> {
         match msg {
-            SidebarMessage::ContainerEntries(entries) => {
-                self.container_entries = entries;
-                Task::none()
-            },
             other => panic!("Message {:?} sent to sidebar", other),
         }
     }
-}
 
-impl SidebarEntry {
-    pub fn view(&self) -> Element<SidebarMessage> {
+    fn container_button(container: &CachedContainer) -> Element<SidebarMessage> {
         let class = ContainerClass {
             background: Some(
                 Background::Color(orbit::NIGHT[0])
@@ -131,7 +116,7 @@ impl SidebarEntry {
 
         Container::new(
             Button::new(
-                Text::new(&*self.name)
+                Text::new(&container.data.name)
             )
         )
         .align_right(Length::Fill)

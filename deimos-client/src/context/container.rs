@@ -1,23 +1,21 @@
 use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-    sync::Arc,
+    io::Write, path::{Path, PathBuf}, str::FromStr, sync::Arc
 };
 
 use chrono::{DateTime, Utc};
 use deimos_shared::{
-    ContainerBrief, ContainerImage, ContainerImagesRequest, ContainerImagesResponse,
-    QueryContainersRequest,
+    ContainerBrief, ContainerImage, ContainerImagesRequest, ContainerImagesResponse, DeimosServiceClient,
 };
 use iced::widget::image;
 use mime::Mime;
-use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
+use tonic::transport::Channel;
 
 use super::Context;
 
 /// Data received from a server about a single container, cached locally.
 /// Contains iced handles for resources used to display the container.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CachedContainer {
     pub data: CachedContainerData,
     pub banner: Option<image::Handle>,
@@ -25,7 +23,7 @@ pub struct CachedContainer {
 }
 
 /// Data to be serialized in a local cache file for a container
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CachedContainerData {
     pub id: String,
     pub name: String,
@@ -33,37 +31,11 @@ pub struct CachedContainerData {
 }
 
 impl Context {
-    /// Synchronize containers from a received list of container data from the server
-    pub async fn synchronize_containers(self: Arc<Self>) {
-        let request = QueryContainersRequest {
-            updated_since: self.state.read().await.last_sync.map(|dt| dt.timestamp()),
-        };
-
-        let list = {
-            let mut api = self.api.lock().await;
-            tracing::trace!("Requesting container data...");
-
-            match api.query_containers(request).await {
-                Ok(resp) => resp.into_inner().containers,
-                Err(e) => {
-                    tracing::error!("Failed to query containers from the server: {e}");
-                    return;
-                }
-            }
-        };
-
-        for item in list {
-            self.synchronize_container_from_brief(item).await;
-        }
-    }
-    
     /// Save all cached container state to the local cache directory
-    pub async fn save_cached_containers(self: Arc<Self>) {
+    pub fn save_cached_containers(&self) {
         let cache_dir = Self::cache_directory();
-
-        for (id, container) in self.containers.read().await.iter() {
-            tracing::trace!("Saving container {}", id);
-            if let Err(e) = container.save(&cache_dir).await {
+        for (id, container) in self.containers.iter() {
+            if let Err(e) = container.save(&cache_dir) {
                 tracing::error!("Failed to save container {}: {}", id, e);
             }
         }
@@ -71,29 +43,9 @@ impl Context {
 
     /// Check if the received container is already cached at its newest version, and request full
     /// container data including images if it is not
-    async fn synchronize_container_from_brief(&self, brief: ContainerBrief) {
-        tracing::trace!("Synchronizing container {}", brief.id);
-        let Some(updated) = DateTime::from_timestamp(brief.updated, 0) else {
-            tracing::warn!(
-                "Failed to create timestamp from container brief timestamp {}",
-                brief.updated
-            );
-            return;
-        };
-
-        {
-            let containers = self.containers.read().await;
-            match containers.get(&brief.id) {
-                Some(existing) if existing.data.last_update >= updated => {
-                    tracing::info!("Skipping update for received container {}, we already have the newest version", brief.id);
-                    return;
-                }
-                _ => (),
-            };
-        }
-
+    pub(super) async fn synchronize_container_from_brief(api: Arc<Mutex<DeimosServiceClient<Channel>>>, brief: ContainerBrief) -> CachedContainer {
         let images = {
-            let mut api = self.api.lock().await;
+            let mut api = api.lock().await;
             let request = ContainerImagesRequest {
                 container_id: brief.id.clone(),
             };
@@ -137,21 +89,19 @@ impl Context {
         };
         
 
-        let id = data.id.clone();
-        let container = CachedContainer { data, banner, icon };
-
-        self.containers
-            .write()
-            .await
-            .insert(id.clone(), Arc::new(container));
-
-        tracing::info!("Finished full sync for container {}", id);
+        CachedContainer {
+            data,
+            banner,
+            icon
+        }
     }
 
     /// Attempt to load all containers from the given local cache directory
-    pub(super) async fn load_cached_containers(&self, dir: &Path) {
+    pub(super) async fn load_cached_containers(&mut self) {
+        let dir = Self::cache_directory();
+
         if !dir.exists() {
-            if let Err(e) = tokio::fs::create_dir(dir).await {
+            if let Err(e) = tokio::fs::create_dir(&dir).await {
                 tracing::error!(
                     "Failed to create cache directory '{}': {}",
                     dir.display(),
@@ -160,7 +110,7 @@ impl Context {
             }
         }
 
-        let mut iter = match tokio::fs::read_dir(dir).await {
+        let mut iter = match tokio::fs::read_dir(&dir).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(
@@ -171,8 +121,6 @@ impl Context {
                 return;
             }
         };
-
-        let mut containers = self.containers.write().await;
 
         loop {
             let entry = match iter.next_entry().await {
@@ -206,11 +154,11 @@ impl Context {
                         }
                     };
 
-                    match containers.get(&meta.id) {
+                    match self.containers.get(&meta.id) {
                         Some(existing) if existing.data.last_update >= meta.last_update => continue,
                         _ => {
                             let full = CachedContainer::load(meta, &path).await;
-                            containers.insert(full.data.id.clone(), Arc::new(full));
+                            self.containers.insert(full.data.id.clone(), full);
                         }
                     }
                 }
@@ -241,16 +189,16 @@ impl CachedContainerData {
     }
     
     /// Write cached container metadata to a local cache directory
-    async fn save(&self, directory: &Path) -> Result<(), CachedContainerSaveError> {
+    fn save(&self, directory: &Path) -> Result<(), CachedContainerSaveError> {
         let meta_path = directory.join(CachedContainer::METADATA_FILE);
 
-        let mut file = tokio::fs::File::create(&meta_path).await.map_err(|err| CachedContainerSaveError::IO {
+        let mut file = std::fs::File::create(&meta_path).map_err(|err| CachedContainerSaveError::IO {
             path: meta_path.clone(),
             err,
         })?;
         
         let bytes = serde_json::to_vec(self)?;
-        file.write_all(&bytes).await.map_err(|err| CachedContainerSaveError::IO { path: meta_path, err })?;
+        file.write_all(&bytes).map_err(|err| CachedContainerSaveError::IO { path: meta_path, err })?;
 
         Ok(())
     }
@@ -278,14 +226,14 @@ impl CachedContainer {
     }
 
     /// Save all state to the filesystem, creating cache directories as required
-    async fn save(&self, cache_dir: &Path) -> Result<(), CachedContainerSaveError> {
+    fn save(&self, cache_dir: &Path) -> Result<(), CachedContainerSaveError> {
         let dir = self.directory(cache_dir);
-        if let Err(e) = tokio::fs::create_dir(&dir).await {
+        if let Err(e) = std::fs::create_dir(&dir) {
             tracing::warn!("Failed to create directory '{}' for container {}: {}", dir.display(), self.data.id, e);
         }
 
         tracing::trace!("Saving container {} to {}", self.data.id, dir.display());
-        self.data.save(&dir).await?;
+        self.data.save(&dir)?;
 
         Ok(())
     }
