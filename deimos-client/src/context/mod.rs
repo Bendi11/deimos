@@ -144,7 +144,7 @@ impl Context {
                     }.then(||
                         iced::Task::perform(
                             Self::synchronize_container_from_brief(self.api.clone(), new),
-                            |container| ContextMessage::SynchronizeContainer(container)
+                            ContextMessage::SynchronizeContainer
                         )
                     ),
                     None => {
@@ -155,6 +155,16 @@ impl Context {
             );
 
         iced::Task::batch(tasks)
+    }
+    
+    /// Restart the client, applying any connection parameter changes since the last connection
+    pub fn reload_settings(&self) -> iced::Task<ContextMessage> {
+        let api = self.api.clone();
+        let settings = self.state.settings.clone();
+        iced::Task::future(async move {
+            let mut api = api.lock().await;
+            *api = Self::connect_api(&settings).await;
+        }).discard()
     }
 
     async fn connect_api(settings: &ContextSettings) -> DeimosServiceClient<Channel> {

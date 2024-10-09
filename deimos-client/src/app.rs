@@ -90,8 +90,13 @@ impl DeimosApplication {
                 iced::exit()
             },
             DeimosMessage::Navigate(view) => {
+                let task = match self.view {
+                    DeimosView::Settings => self.ctx.reload_settings().map(DeimosMessage::Context),
+                    _ => iced::Task::none(),
+                };
+
                 self.view = view;
-                iced::Task::none()
+                task
             },
             DeimosMessage::Context(msg) => self.ctx.update(msg).map(DeimosMessage::Context),
             DeimosMessage::Settings(msg) => self.settings.update(&mut self.ctx, msg).map(DeimosMessage::Settings),
