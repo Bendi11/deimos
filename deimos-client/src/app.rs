@@ -87,7 +87,7 @@ impl DeimosApplication {
                 iced::Task::none()
             },
             DeimosMessage::Context(msg) => self.ctx.update(msg).map(DeimosMessage::Context),
-            DeimosMessage::Settings(msg) => self.settings.update(msg).map(DeimosMessage::Settings),
+            DeimosMessage::Settings(msg) => self.settings.update(&mut self.ctx, msg).map(DeimosMessage::Settings),
             DeimosMessage::Sidebar(m) => match m {
                 SidebarMessage::Refresh => self.ctx.synchronize_from_server().map(DeimosMessage::Context),
                 other => self.sidebar.update(other).map(DeimosMessage::Sidebar),
@@ -117,7 +117,7 @@ impl DeimosApplication {
         Row::new()
             .push(self.sidebar.view(&self.ctx).map(DeimosMessage::Sidebar))
             .push(match self.view {
-                DeimosView::Settings => self.settings.view().map(DeimosMessage::Settings),
+                DeimosView::Settings => self.settings.view(&self.ctx).map(DeimosMessage::Settings),
                 _ => self.empty_view(),
             })
             .into()
