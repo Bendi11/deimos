@@ -1,8 +1,9 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
-use bollard::Docker;
-use container::{ManagedContainer, ManagedContainerError};
+use bollard::{container::RemoveContainerOptions, secret::{EventMessage, EventMessageTypeEnum}, system::EventsOptions, Docker};
+use container::{ManagedContainer, ManagedContainerError, ManagedContainerState};
 use dashmap::DashMap;
+use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 pub mod container;
@@ -11,7 +12,7 @@ pub mod container;
 pub struct DockerState {
     pub config: DockerConfig,
     pub docker: Docker,
-    /// Map of container names to their state
+    /// Map of managed container IDs to their config and state
     pub containers: DashMap<String, Arc<ManagedContainer>>,
 }
 
@@ -89,26 +90,7 @@ impl DockerState {
             let container = match entry.file_type() {
                 Ok(fty) if fty.is_dir() => {
                     ManagedContainer::load_from_dir(entry.path(), &docker).await
-                }
-                Ok(fty) if fty.is_symlink() => {
-                    let meta = match tokio::fs::symlink_metadata(entry.path()).await {
-                        Ok(meta) => meta,
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to get symlink metadata for symlink {}, skipping due to {}",
-                                entry.path().display(),
-                                e
-                            );
-                            continue;
-                        }
-                    };
-
-                    if meta.is_dir() {
-                        ManagedContainer::load_from_dir(entry.path(), &docker).await
-                    } else {
-                        continue;
-                    }
-                }
+                },
                 Ok(_) => {
                     tracing::warn!(
                         "Unknown file in container config directory: {}",
@@ -155,8 +137,94 @@ impl DockerState {
     }
     
     /// Create a container from the configuration loaded for the given managed container
-    pub async fn create_container(&self, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
-        managed.create(self.docker.clone()).await.map_err(Into::into)
+    pub async fn create_container(self: &Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
+        let config = managed.docker_config();
+
+        let response = self.docker
+            .create_container::<String, String>(
+                None,
+                config
+            )
+            .await?;
+
+        tracing::trace!("Created container with ID {} for {}", response.id, managed.container_name());
+
+        for warning in response.warnings {
+            tracing::warn!("Warning when creating container {}: {}", managed.container_name(), warning);
+        }
+
+        self.docker
+            .rename_container(
+                &response.id,
+                bollard::container::RenameContainerOptions { name: managed.container_name().to_owned() }
+            )
+            .await?;
+
+        tracing::trace!("Renamed container {}", managed.container_name());
+
+        let mut filters = HashMap::new();
+        filters.insert("id".to_owned(), vec![response.id.clone()]);
+        let opts = EventsOptions {
+            filters,
+            ..Default::default()
+        };
+        
+        let docker_id: Arc<str> = Arc::from(response.id);
+        
+        let mut subscription = self.docker.events(Some(opts));
+        let this = self.clone();
+        let id2 = docker_id.clone();
+        let listener = tokio::task::spawn(async move {
+            while let Some(event) = subscription.next().await {
+                match event {
+                    Ok(event) => this.handle_container_event(event).await,
+                    Err(e) => {
+                        tracing::error!("Failed to get Docker event for container {id2}: {e}");
+                    }
+                }
+            }
+        });
+
+        tracing::trace!("Subscribed to events for container '{}': {}", managed.container_name(), docker_id);
+
+        let mut state = managed.state.lock().await;
+        *state = Some(
+            ManagedContainerState {
+                docker_id,
+                listener,
+            }
+        );
+
+        Ok(())
+    }
+
+    async fn handle_container_event(&self, event: EventMessage) {
+        let Some(action) = event.action else { return };
+        match &action {
+            
+        }
+    }
+    
+    /// Stop and remove the Docker container for the given managed container, and remove event
+    /// listeners for the container
+    async fn destroy(&self, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
+        let Some(state) = managed.state.lock().await.take() else { return Ok(()) };
+        self.docker.stop_container(&state.docker_id, None).await?;
+        self.docker.remove_container(
+            &state.docker_id,
+            Some(RemoveContainerOptions {
+                force: false,
+                ..Default::default()
+            })
+        ).await?;
+
+        tracing::info!("Stopped and removed container {} for {}", state.docker_id, managed.container_name());
+
+        state.listener.abort();
+
+        tracing::trace!("Aborted event listener for {}", managed.container_name());
+
+        Ok(())
     }
     
     /// Run all necessary tasks for the Docker container manager, cancel-safe with the given
@@ -172,7 +240,7 @@ impl DockerState {
     }
 
     async fn run_internal(self: Arc<Self>) {
-    
+        
     }
 
     /// Attempt to stop all running containers, e.g. for graceful server shutdown

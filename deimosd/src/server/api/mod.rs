@@ -136,8 +136,15 @@ impl DeimosService for Deimos {
         )
     }
 
-    async fn container_status(self: Arc<Self>, _: tonic::Request<ContainerStatusRequest>) -> Result<tonic::Response<ContainerStatusResponse>, tonic::Status> {
-        Err(tonic::Status::unimplemented("unimplemented"))
+    async fn container_status(self: Arc<Self>, req: tonic::Request<ContainerStatusRequest>) -> Result<tonic::Response<ContainerStatusResponse>, tonic::Status> {
+        let req = req.into_inner();
+        match self.docker.containers.get(&req.container_id) {
+            Some(container) => {
+            },
+            None => Err(
+                tonic::Status::not_found(format!("No such container '{}'", req.container_id))
+            )
+        }
     }
 
     type ContainerStatusStreamStream = ContainerStatusStreamer;

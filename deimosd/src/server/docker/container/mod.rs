@@ -1,75 +1,12 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::{SystemTime, SystemTimeError}};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::SystemTime};
 
-use bollard::{container::RemoveContainerOptions, Docker};
-use chrono::{DateTime, NaiveDateTime, Utc};
+use bollard::{container::RemoveContainerOptions, secret::ContainerState, Docker};
+use chrono::{DateTime, Utc};
+use config::ManagedContainerConfig;
 use tokio::{io::AsyncReadExt, sync::Mutex};
 
-/// Configuration for a managed Docker container
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedContainerConfig {
-    /// ID of the container, must remain constant over server renames
-    pub id: Arc<str>,
-    /// Name that identifies this container
-    pub name: Arc<str>,
-    /// Banner image to be displayed in user interfaces
-    pub banner_path: Option<PathBuf>,
-    /// Icon image to be displayed in user interfaces
-    pub icon_path: Option<PathBuf>,
-    /// Configuration for the Docker container
-    pub docker: ManagedContainerDockerConfig,
-}
-
-/// Configuration to be passed to Docker when  starting this container
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedContainerDockerConfig {
-    /// Docker image used to create the Docker container
-    pub image: String,
-    /// List of volumes to mount inside the container
-    #[serde(default)]
-    pub volume: Vec<ManagedContainerDockerMountConfig>,
-    /// List of network ports to forward to the container
-    #[serde(default)]
-    pub port: Vec<ManagedContainerDockerPortConfig>,
-    /// List of environment variables to define for the container
-    #[serde(default)]
-    pub env: Vec<ManagedContainerDockerEnvConfig>,
-}
-
-/// Configuration for a local volume mounted to a Docker container
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedContainerDockerMountConfig {
-    pub local: PathBuf,
-    pub container: PathBuf,
-}
-
-/// Configuration for a network port forwarded to the Docker container
-#[derive(Debug, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedContainerDockerPortConfig {
-    pub expose: u16,
-    pub protocol: ManagedContainerDockerPortProtocol,
-    #[serde(default)]
-    pub upnp: bool,
-}
-
-/// Selectable protocol for forwarded port
-#[derive(Debug, serde::Deserialize)]
-pub enum ManagedContainerDockerPortProtocol {
-    #[serde(rename = "udp")]
-    Udp,
-    #[serde(rename = "udp")]
-    Tcp,
-}
-
-/// Configuration for an environment variable to be set in the container
-#[derive(Debug, serde::Deserialize)]
-pub struct ManagedContainerDockerEnvConfig {
-    pub key: String,
-    pub value: String,
-}
+pub mod state;
+pub mod config;
 
 /// A managed container that represents a running or stopped container
 pub struct ManagedContainer {
@@ -88,6 +25,8 @@ pub struct ManagedContainer {
 pub struct ManagedContainerState {
     /// ID of the container running for this
     pub docker_id: Arc<str>,
+    /// Task listening for events propogated by the docker container
+    pub listener: tokio::task::JoinHandle<()>,
 }
 
 impl ManagedContainer {
@@ -220,53 +159,20 @@ impl ManagedContainer {
     /// Create a Docker container instance from the configuration given and rename it to match the
     /// name given in the config
     pub async fn create(&self, docker: Docker) -> Result<(), ManagedContainerError> {
-        let config = self.docker_config();
-
-        let response = docker
-            .create_container::<String, String>(
-                None,
-                config
-            )
-            .await?;
-
-        tracing::trace!("Created container with ID {} for {}", response.id, self.container_name());
-
-        for warning in response.warnings {
-            tracing::warn!("Warning when creating container {}: {}", self.container_name(), warning);
-        }
-
-        docker
-            .rename_container(
-                &response.id,
-                bollard::container::RenameContainerOptions { name: self.container_name().to_owned() }
-            )
-            .await?;
-
-        tracing::trace!("Renamed container {}", self.container_name());
         
-        let mut state = self.state.lock().await;
-        *state = Some(
-            ManagedContainerState {
-                docker_id: Arc::from(response.id)
-            }
-        );
-
         Ok(())
+    }
+
+    pub async fn status(&self, docker: Docker) -> Result<Option<()>, ManagedContainerError> {
+        let Some(ref state) = *self.state.lock().await else { return Ok(None) };
+        let inspect = docker.inspect_container(&state.docker_id, None).await?;
+
+        Ok(None)
     }
     
     /// Stop and remove the Docker container for this managed container
     pub async fn destroy(self: Arc<Self>, docker: Docker) -> Result<(), ManagedContainerError> {
-        let Some(ref state) = *self.state.lock().await else { return Ok(()) };
-        docker.stop_container(&state.docker_id, None).await?;
-        docker.remove_container(
-            &state.docker_id,
-            Some(RemoveContainerOptions {
-                force: false,
-                ..Default::default()
-            })
-        ).await?;
-
-        tracing::info!("Stopped and removed container {} for {}", state.docker_id, self.container_name());
+        
 
         Ok(())
     }
@@ -285,16 +191,6 @@ impl ManagedContainer {
     /// Get the name of the Docker container when run
     pub fn container_name(&self) -> &str {
         &self.config.name
-    }
-}
-
-impl ManagedContainerDockerPortProtocol {
-    /// Get the string to use when specifying the protocol to the Docker API
-    pub const fn docker_name(&self) -> &'static str {
-        match self {
-            Self::Udp => "udp",
-            Self::Tcp => "tcp",
-        }
     }
 }
 

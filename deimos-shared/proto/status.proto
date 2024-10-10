@@ -6,9 +6,7 @@ message ContainerStatusRequest {
     string container_id = 1;
 }
 
-message ContainerStatusResponse {
-    bool online = 1;
-}
+message ContainerStatusResponse {}
 
 message ContainerStatusStreamRequest {}
 

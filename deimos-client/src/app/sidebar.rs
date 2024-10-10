@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use iced::{alignment::Horizontal, border::Radius, gradient::Linear, widget::svg, Background, ContentFit, Degrees, Gradient, Length, Padding, Radians, Shadow, Task, Vector};
+use iced::{alignment::{Horizontal, Vertical}, border::Radius, gradient::Linear, widget::svg, Background, ContentFit, Degrees, Gradient, Length, Padding, Radians, Shadow, Task, Vector};
 
 use crate::context::{container::CachedContainer, Context};
 
@@ -34,7 +34,7 @@ impl Sidebar {
             )
             .push(
                 Column::new()
-                    .spacing(16)
+                    .spacing(8)
                     .align_x(Horizontal::Center)
                     .width(Length::FillPortion(1))
                     .push(
@@ -47,12 +47,16 @@ impl Sidebar {
                         Container::new(
                             Button::new(
                                 Svg::new(self.reload.clone())
-                                    .content_fit(ContentFit::Contain)
                                     .class((orbit::MERCURY[3], orbit::SOL[0]))
+                                    .height(32f32)
+                                    .width(32f32)
                             )
                             .on_press(SidebarMessage::Refresh)
-                            .padding(Padding::default().left(85))
-                        ).align_right(Length::Fill)
+                        )
+                            .width(Length::Fill)
+                            .height(Length::Fill)
+                            .align_x(Horizontal::Right)
+                            .align_y(Vertical::Bottom)
                     )
 
             )
@@ -64,16 +68,26 @@ impl Sidebar {
             )
             .height(100);
 
-        let mut col = Column::new()
-            .padding(Padding::default().left(10).right(10))
+        let mut containers = Column::new()
+            .height(Length::FillPortion(8))
             .spacing(16)
-            .push(header);
+            .padding(
+                Padding::default()
+                    .left(10f32)
+                    .right(10f32)
+            );
 
         for (_, container) in ctx.containers.iter() {
-            col = col.push(Self::container_button(container));
+            containers = containers.push(Self::container_button(container));
         }
 
-        Container::new(col)
+
+        let top = Column::new()
+            .spacing(32)
+            .push(header)
+            .push(containers);
+
+        Container::new(top)
             .class(ContainerClass {
                 radius: Radius {
                     top_left: 0f32,
