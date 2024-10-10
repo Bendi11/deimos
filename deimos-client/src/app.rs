@@ -46,7 +46,7 @@ pub enum DeimosMessage {
 impl DeimosApplication {
     /// Load application state from a save file and return the application
     async fn load() -> Self {
-        let ctx = Context::new().await;
+        let ctx = Context::load().await;
         let view = DeimosView::Empty;
 
         let settings_icon = svg::Handle::from_memory(include_bytes!("../assets/settings.svg"));
@@ -86,7 +86,7 @@ impl DeimosApplication {
     fn update(&mut self, msg: DeimosMessage) -> Task<DeimosMessage> {
         match msg {
             DeimosMessage::Close => {
-                self.ctx.cleanup();
+                self.ctx.save();
                 iced::exit()
             },
             DeimosMessage::Navigate(view) => {

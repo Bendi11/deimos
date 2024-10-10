@@ -8,14 +8,18 @@ use tokio::sync::Mutex;
 use tonic::transport::Channel;
 
 pub mod container;
-pub mod load;
+mod load;
 
 /// Context shared across the application used to perform API requests and maintain a local
 /// container cache.
 #[derive(Debug)]
 pub struct Context {
+    /// Context state preserved in save files
     pub state: ContextState,
+    /// A map of all loaded containers, to be modified by gRPC notifications
     pub containers: HashMap<String, CachedContainer>,
+    /// Directory that all container data and context state will be saved to
+    cache_dir: PathBuf,
     api: Arc<Mutex<DeimosServiceClient<Channel>>>,
 }
 
@@ -49,16 +53,22 @@ pub enum ContextMessage {
 
 impl Context {
     pub const CACHE_DIR_NAME: &str = "deimos";
-
-    pub fn cleanup(&self) {
+    
+    /// Save all context state and new data received for containers to the local cache directory
+    pub fn save(&self) {
         self.save_state();
         self.save_cached_containers();
     }
 
-    /// Create a new lazy API client, which will not attempt a connection until the first API call
-    /// is made
-    pub async fn new() -> Self {
-        let state = match Self::load_state() {
+    /// Load all context state from the local cache directory and begin connection attempts to the
+    /// gRPC server with the loaded settings
+    pub async fn load() -> Self {
+        let cache_dir = match dirs::cache_dir() {
+            Some(dir) => dir.join(Self::CACHE_DIR_NAME),
+            None => PathBuf::from("./deimos-cache"),
+        };
+
+        let state = match Self::load_state(&cache_dir) {
             Ok(state) => state,
             Err(e) => {
                 tracing::error!("Failed to load application state: {e}");
@@ -74,6 +84,7 @@ impl Context {
             state,
             api,
             containers,
+            cache_dir
         };
 
         me.load_cached_containers().await;
@@ -166,7 +177,9 @@ impl Context {
             *api = Self::connect_api(&settings).await;
         }).discard()
     }
-
+    
+    /// Create a new gRPC client with the given connection settings, used to refresh the connection
+    /// as settings are updated
     async fn connect_api(settings: &ContextSettings) -> DeimosServiceClient<Channel> {
         DeimosServiceClient::new(
             Channel::builder(settings.server_uri.clone())
@@ -174,14 +187,6 @@ impl Context {
                 .timeout(settings.request_timeout)
                 .connect_lazy(),
         )
-    }
-
-
-    fn cache_directory() -> PathBuf {
-        match dirs::cache_dir() {
-            Some(dir) => dir.join(Self::CACHE_DIR_NAME),
-            None => PathBuf::from("./cache"),
-        }
     }
 }
 

@@ -1,19 +1,14 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{Context, ContextState};
 
 impl Context {
+    /// File located in the context's cache directory that stores serialized state
     pub const STATE_FILE_NAME: &str = "state.json";
 
-    fn state_file_path() -> PathBuf {
-        Self::cache_directory().join(Self::STATE_FILE_NAME)
-    }
-
     /// Load application context state from the local cache directory, or create a default one
-    pub fn load_state() -> Result<ContextState, LoadStateError> {
-        let config_dir = Self::cache_directory();
-
-        let config_path = config_dir.join(Self::STATE_FILE_NAME);
+    pub fn load_state(cache_dir: &Path) -> Result<ContextState, LoadStateError> {
+        let config_path = cache_dir.join(Self::STATE_FILE_NAME);
         match std::fs::File::open(&config_path) {
             Ok(rdr) => Ok(
                 serde_json::from_reader::<_, ContextState>(rdr).map_err(|e| LoadStateError {
@@ -27,11 +22,11 @@ impl Context {
                     config_path.display()
                 );
 
-                if !std::fs::exists(&config_dir).unwrap_or(false) {
-                    if let Err(e) = std::fs::create_dir(&config_dir) {
+                if !std::fs::exists(cache_dir).unwrap_or(false) {
+                    if let Err(e) = std::fs::create_dir(&cache_dir) {
                         tracing::warn!(
                             "Failed to create config directory {}: {}",
-                            config_dir.display(),
+                            cache_dir.display(),
                             e
                         );
                     }
@@ -57,9 +52,11 @@ impl Context {
             }),
         }
     }
-
+    
+    /// Write all context state to the save file located in the cache directory
     pub fn save_state(&self) {
-        let state_path = Self::state_file_path();
+        let state_path = self.cache_dir.join(Self::STATE_FILE_NAME);
+
         match std::fs::File::create(&state_path) {
             Ok(w) => {
                 if let Err(e) = serde_json::to_writer::<_, ContextState>(w, &self.state) {

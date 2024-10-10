@@ -33,9 +33,8 @@ pub struct CachedContainerData {
 impl Context {
     /// Save all cached container state to the local cache directory
     pub fn save_cached_containers(&self) {
-        let cache_dir = Self::cache_directory();
         for (id, container) in self.containers.iter() {
-            if let Err(e) = container.save(&cache_dir) {
+            if let Err(e) = container.save(&self.cache_dir) {
                 tracing::error!("Failed to save container {}: {}", id, e);
             }
         }
@@ -98,24 +97,22 @@ impl Context {
 
     /// Attempt to load all containers from the given local cache directory
     pub(super) async fn load_cached_containers(&mut self) {
-        let dir = Self::cache_directory();
-
-        if !dir.exists() {
-            if let Err(e) = tokio::fs::create_dir(&dir).await {
+        if !self.cache_dir.exists() {
+            if let Err(e) = tokio::fs::create_dir(&self.cache_dir).await {
                 tracing::error!(
                     "Failed to create cache directory '{}': {}",
-                    dir.display(),
+                    self.cache_dir.display(),
                     e
                 );
             }
         }
 
-        let mut iter = match tokio::fs::read_dir(&dir).await {
+        let mut iter = match tokio::fs::read_dir(&self.cache_dir).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(
                     "Failed to load cached containers from {}: {}",
-                    dir.display(),
+                    self.cache_dir.display(),
                     e
                 );
                 return;
@@ -129,7 +126,7 @@ impl Context {
                 Err(e) => {
                     tracing::warn!(
                         "Failed to get entry from directory {}: {}",
-                        dir.display(),
+                        self.cache_dir.display(),
                         e
                     );
                     continue;
