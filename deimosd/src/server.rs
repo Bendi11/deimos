@@ -1,7 +1,7 @@
 use std::{process::ExitCode, sync::Arc};
 
 use api::{ApiConfig, ApiInitError, ApiState};
-use docker::{DockerConfig, DockerState};
+use docker::{state::DockerConfig, DockerState};
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
 use upnp::Upnp;
@@ -29,9 +29,8 @@ impl Deimos {
     /// and creating a TCP listener for the control interface.
     pub async fn new(config: DeimosConfig) -> Result<Arc<Self>, ServerInitError> {
         let upnp = Upnp::new().await?;
-        let (sender, _) = tokio::sync::broadcast::channel(2);
 
-        let docker = DockerState::new(sender, config.docker)
+        let docker = DockerState::new(config.docker)
             .await
             .map_err(ServerInitError::Docker)?;
 

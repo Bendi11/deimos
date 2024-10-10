@@ -11,7 +11,6 @@ use tonic::transport::Identity;
 use zeroize::Zeroize;
 
 use super::docker::container::{ManagedContainerRunning, ManagedContainerState};
-use super::docker::ManagedContainerNotification;
 use super::upnp::{Upnp, UpnpLease};
 use super::Deimos;
 
@@ -20,6 +19,8 @@ pub struct ApiState {
     pub config: ApiConfig,
     /// Address leased for the API
     pub lease: Option<UpnpLease>,
+    /// Status notification sender for gRPC subscribers
+    pub sender: tokio::sync::broadcast::Sender<ContainerStatusNotification>,
 }
 
 /// Configuration used to initialize and inform the Deimos API service
@@ -49,17 +50,21 @@ impl ApiState {
             false => None,
         };
 
+
+        let (sender, _) = tokio::sync::broadcast::channel(2);
+
         Ok(
             Self {
                 config,
                 lease,
+                sender,
             }
         )
     }
 }
 
 pub struct ContainerStatusStreamer {
-    channel: Arc<Mutex<broadcast::Receiver<ManagedContainerNotification>>>,
+    channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>,
     state: Pin<Box<dyn Future<Output = Option<ContainerStatusNotification>> + 'static + Send>>,
 }
 
@@ -176,7 +181,7 @@ impl DeimosService for Deimos {
     type ContainerStatusStreamStream = ContainerStatusStreamer;
 
     async fn container_status_stream(self: Arc<Self>, _: tonic::Request<ContainerStatusStreamRequest>) -> Result<tonic::Response<ContainerStatusStreamer>, tonic::Status> {
-        let rx = self.docker.sender.subscribe();
+        let rx = self.api.sender.subscribe();
 
         Ok(
             tonic::Response::new(
@@ -201,7 +206,7 @@ impl Stream for ContainerStatusStreamer {
 }
 
 impl ContainerStatusStreamer {
-    pub fn new(channel: broadcast::Receiver<ManagedContainerNotification>) -> Self {
+    pub fn new(channel: broadcast::Receiver<ContainerStatusNotification>) -> Self {
         let channel = Arc::new(Mutex::new(channel));
         let state = Self::future(channel.clone());
 
@@ -211,7 +216,7 @@ impl ContainerStatusStreamer {
         }
     }
 
-    fn future(channel: Arc<Mutex<broadcast::Receiver<ManagedContainerNotification>>>) -> BoxFuture<'static, Option<ContainerStatusNotification>> {
+    fn future(channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>) -> BoxFuture<'static, Option<ContainerStatusNotification>> {
         Box::pin(async move {
             channel
                 .lock()
@@ -219,12 +224,6 @@ impl ContainerStatusStreamer {
                 .recv()
                 .map(Result::ok)
                 .await
-                .map(|not| ContainerStatusNotification {
-                    container_id: String::from(not.id.as_ref()),
-                    status: not.running.map(|running| ContainerDockerStatus {
-                        run_status: ContainerDockerRunStatus::from(running.into()).into(),
-                    }),
-                })
         })
     }
 }
