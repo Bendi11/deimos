@@ -14,6 +14,14 @@ pub struct DockerState {
     pub docker: Docker,
     /// Map of managed container IDs to their config and state
     pub containers: DashMap<String, Arc<ManagedContainer>>,
+    /// Status notification sender for gRPC subscribers
+    pub sender: tokio::sync::broadcast::Sender<ManagedContainerNotification>,
+}
+
+#[derive(Clone)]
+pub struct ManagedContainerNotification {
+    pub id: Arc<str>,
+    pub running: Option<ManagedContainerRunning>,
 }
 
 /// Configuration for the local Docker container management service
@@ -47,7 +55,7 @@ impl DockerState {
 
     /// Load the docker service from a config file specifying how to connect to the local Docker
     /// engine and where to load container configurations from
-    pub async fn new(config: DockerConfig) -> Result<Self, DockerInitError> {
+    pub async fn new(sender: tokio::sync::broadcast::Sender<ManagedContainerNotification>, config: DockerConfig) -> Result<Self, DockerInitError> {
         let docker = match config.conn {
             None => {
                 tracing::info!("No docker config given, using platform defaults to connect");
@@ -133,6 +141,7 @@ impl DockerState {
             config,
             docker,
             containers,
+            sender,
         })
     }
     
@@ -200,7 +209,7 @@ impl DockerState {
         tokio::task::spawn(async move {
             while let Some(event) = subscription.next().await {
                 match event {
-                    Ok(event) => self.clone().handle_container_event(managed.clone(), event).await,
+                    Ok(event) => self.clone().handle_container_event(id.clone(), managed.clone(), event).await,
                     Err(e) => {
                         tracing::error!("Failed to get Docker event for container {id}: {e}");
                     }
@@ -208,39 +217,58 @@ impl DockerState {
             }
         })
     }
+    
+    /// Handle an event received from Docker, updating the state of the given container if required
+    /// and sending status notifications to the gRPC server
+    async fn handle_container_event(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) {
+        {
+            let Some(action) = event.action else { return };
+            let mut lock = managed.state.lock().await;
+            let Some(ref mut state) = *lock else {
+                tracing::warn!("Received event for deleted container {}", managed.container_name());
+                return
+            };
 
-    async fn handle_container_event(self: Arc<Self>, managed: Arc<ManagedContainer>, event: EventMessage) {
-        let Some(action) = event.action else { return };
-        let Some(ref mut state) = *managed.state.lock().await else {
-            tracing::warn!("Received event for deleted container {}", managed.container_name());
-            return
-        };
 
-        tracing::info!("Container {} for {} got event '{}'", state.docker_id, managed.container_name(), action.as_str());
+            tracing::info!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
 
-        match action.as_str() {
-            "oom" => {
-                tracing::error!("Container {} out of memory received - destroying container", state.docker_id);
-                state.running = ManagedContainerRunning::Dead;
-                self.clone().destroy(managed.clone());
-            },
-            "kill" | "die" => {
-                state.running = ManagedContainerRunning::Dead;
-                self.clone().destroy(managed.clone());
-            },
-            "paused" => {
-                state.running = ManagedContainerRunning::Paused;
-            },
-            "unpause" => {
-                state.running = ManagedContainerRunning::Running;
+            match action.as_str() {
+                "oom" => {
+                    tracing::error!("Container {} out of memory received - destroying container", state.docker_id);
+                    state.running = ManagedContainerRunning::Dead;
+                    drop(lock);
+                    if let Err(e) = self.clone().destroy(managed.clone()).await {
+                        tracing::error!("Failed to destroy container {}: {}", id, e);
+                    }
+                },
+                "kill" | "die" => {
+                    state.running = ManagedContainerRunning::Dead;
+                    drop(lock);
+                    if let Err(e) = self.clone().destroy(managed.clone()).await {
+                        tracing::error!("Failed to destroy container {}: {}", id, e);
+                    }
+                },
+                "paused" => {
+                    state.running = ManagedContainerRunning::Paused;
+                },
+                "unpause" => {
+                    state.running = ManagedContainerRunning::Running;
+                }
+                "start" => {
+                    state.running = ManagedContainerRunning::Running;
+                },
+                "stop" => {
+                    state.running = ManagedContainerRunning::Dead;
+                }
+                _ => return
             }
-            "start" => {
-                state.running = ManagedContainerRunning::Running;
-            },
-            "stop" => {
-                state.running = ManagedContainerRunning::Dead;
-            }
-            _ => {}
+        }
+        
+        if let Err(e) = self.sender.send(ManagedContainerNotification {
+            id,
+            running: managed.state.lock().await.as_ref().map(|state| state.running),
+        }) {
+            tracing::error!("Failed to send container status update to API task: {e}");
         }
     }
     

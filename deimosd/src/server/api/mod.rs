@@ -10,7 +10,8 @@ use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use tonic::transport::Identity;
 use zeroize::Zeroize;
 
-use super::docker::container::ManagedContainerRunning;
+use super::docker::container::{ManagedContainerRunning, ManagedContainerState};
+use super::docker::ManagedContainerNotification;
 use super::upnp::{Upnp, UpnpLease};
 use super::Deimos;
 
@@ -58,7 +59,7 @@ impl ApiState {
 }
 
 pub struct ContainerStatusStreamer {
-    channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>,
+    channel: Arc<Mutex<broadcast::Receiver<ManagedContainerNotification>>>,
     state: Pin<Box<dyn Future<Output = Option<ContainerStatusNotification>> + 'static + Send>>,
 }
 
@@ -104,6 +105,26 @@ impl Deimos {
         
         Ok(())
     }
+
+    fn state_to_response(state: &Option<ManagedContainerState>) -> ContainerStatusResponse {
+        ContainerStatusResponse {
+            status: state
+                .as_ref()
+                .map(|state| ContainerDockerStatus {
+                    run_status: ContainerDockerRunStatus::from(state.running.into()).into(),
+                })
+        }
+    }
+}
+
+impl Into<ContainerDockerRunStatus> for ManagedContainerRunning {
+    fn into(self) -> ContainerDockerRunStatus {
+        match self {
+            Self::Dead => ContainerDockerRunStatus::Dead,
+            Self::Paused => ContainerDockerRunStatus::Paused,
+            Self::Running => ContainerDockerRunStatus::Running,
+        }
+    }
 }
 
 
@@ -143,19 +164,7 @@ impl DeimosService for Deimos {
             Some(container) => {
                 let state = container.state.lock().await;
                 Ok(
-                    tonic::Response::new(
-                        ContainerStatusResponse {
-                            status: state
-                                .as_ref()
-                                .map(|state| ContainerDockerStatus {
-                                    run_status: match state.running {
-                                        ManagedContainerRunning::Dead => ContainerDockerRunStatus::Dead,
-                                        ManagedContainerRunning::Paused => ContainerDockerRunStatus::Paused,
-                                        ManagedContainerRunning::Running => ContainerDockerRunStatus::Running,
-                                    }.into()
-                                })
-                        }
-                    )
+                    tonic::Response::new(Self::state_to_response(&state))
                 )
             },
             None => Err(
@@ -167,7 +176,7 @@ impl DeimosService for Deimos {
     type ContainerStatusStreamStream = ContainerStatusStreamer;
 
     async fn container_status_stream(self: Arc<Self>, _: tonic::Request<ContainerStatusStreamRequest>) -> Result<tonic::Response<ContainerStatusStreamer>, tonic::Status> {
-        let rx = self.status.subscribe();
+        let rx = self.docker.sender.subscribe();
 
         Ok(
             tonic::Response::new(
@@ -192,7 +201,7 @@ impl Stream for ContainerStatusStreamer {
 }
 
 impl ContainerStatusStreamer {
-    pub fn new(channel: broadcast::Receiver<ContainerStatusNotification>) -> Self {
+    pub fn new(channel: broadcast::Receiver<ManagedContainerNotification>) -> Self {
         let channel = Arc::new(Mutex::new(channel));
         let state = Self::future(channel.clone());
 
@@ -202,7 +211,7 @@ impl ContainerStatusStreamer {
         }
     }
 
-    fn future(channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>) -> BoxFuture<'static, Option<ContainerStatusNotification>> {
+    fn future(channel: Arc<Mutex<broadcast::Receiver<ManagedContainerNotification>>>) -> BoxFuture<'static, Option<ContainerStatusNotification>> {
         Box::pin(async move {
             channel
                 .lock()
@@ -210,6 +219,12 @@ impl ContainerStatusStreamer {
                 .recv()
                 .map(Result::ok)
                 .await
+                .map(|not| ContainerStatusNotification {
+                    container_id: String::from(not.id.as_ref()),
+                    status: not.running.map(|running| ContainerDockerStatus {
+                        run_status: ContainerDockerRunStatus::from(running.into()).into(),
+                    }),
+                })
         })
     }
 }
