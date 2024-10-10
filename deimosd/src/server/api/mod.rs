@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
-use deimos_shared::{util, ContainerBrief, ContainerImagesRequest, ContainerImagesResponse, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
+use deimos_shared::{util, ContainerBrief, ContainerImagesRequest, ContainerImagesResponse, ContainerDockerStatus, ContainerDockerRunStatus, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use igd_next::PortMappingProtocol;
 use tokio::sync::{broadcast, Mutex};
@@ -10,6 +10,7 @@ use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use tonic::transport::Identity;
 use zeroize::Zeroize;
 
+use super::docker::container::ManagedContainerRunning;
 use super::upnp::{Upnp, UpnpLease};
 use super::Deimos;
 
@@ -140,6 +141,22 @@ impl DeimosService for Deimos {
         let req = req.into_inner();
         match self.docker.containers.get(&req.container_id) {
             Some(container) => {
+                let state = container.state.lock().await;
+                Ok(
+                    tonic::Response::new(
+                        ContainerStatusResponse {
+                            status: state
+                                .as_ref()
+                                .map(|state| ContainerDockerStatus {
+                                    run_status: match state.running {
+                                        ManagedContainerRunning::Dead => ContainerDockerRunStatus::Dead,
+                                        ManagedContainerRunning::Paused => ContainerDockerRunStatus::Paused,
+                                        ManagedContainerRunning::Running => ContainerDockerRunStatus::Running,
+                                    }.into()
+                                })
+                        }
+                    )
+                )
             },
             None => Err(
                 tonic::Status::not_found(format!("No such container '{}'", req.container_id))
@@ -196,7 +213,6 @@ impl ContainerStatusStreamer {
         })
     }
 }
-
 
 
 #[derive(Debug, thiserror::Error)]

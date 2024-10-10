@@ -1,9 +1,9 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use bollard::{container::RemoveContainerOptions, secret::{EventMessage, EventMessageTypeEnum}, system::EventsOptions, Docker};
-use container::{ManagedContainer, ManagedContainerError, ManagedContainerState};
+use container::{ManagedContainer, ManagedContainerError, ManagedContainerRunning, ManagedContainerState};
 use dashmap::DashMap;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
 pub mod container;
@@ -171,19 +171,10 @@ impl DockerState {
         
         let docker_id: Arc<str> = Arc::from(response.id);
         
-        let mut subscription = self.docker.events(Some(opts));
-        let this = self.clone();
-        let id2 = docker_id.clone();
-        let listener = tokio::task::spawn(async move {
-            while let Some(event) = subscription.next().await {
-                match event {
-                    Ok(event) => this.handle_container_event(event).await,
-                    Err(e) => {
-                        tracing::error!("Failed to get Docker event for container {id2}: {e}");
-                    }
-                }
-            }
-        });
+        let subscription = self.docker.events(Some(opts));
+        let listener = self
+            .clone()
+            .subscribe_container_events(subscription, managed.clone(), docker_id.clone());
 
         tracing::trace!("Subscribed to events for container '{}': {}", managed.container_name(), docker_id);
 
@@ -191,23 +182,71 @@ impl DockerState {
         *state = Some(
             ManagedContainerState {
                 docker_id,
+                running: ManagedContainerRunning::Dead,
                 listener,
             }
         );
 
         Ok(())
     }
+    
+    /// Spawn a new task that monitors a stream of Docker events for the given container
+    fn subscribe_container_events(
+        self: Arc<Self>,
+        mut subscription: impl Stream<Item = Result<EventMessage, bollard::errors::Error>> + Send + Unpin + 'static,
+        managed: Arc<ManagedContainer>,
+        id: Arc<str>
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::task::spawn(async move {
+            while let Some(event) = subscription.next().await {
+                match event {
+                    Ok(event) => self.clone().handle_container_event(managed.clone(), event).await,
+                    Err(e) => {
+                        tracing::error!("Failed to get Docker event for container {id}: {e}");
+                    }
+                }
+            }
+        })
+    }
 
-    async fn handle_container_event(&self, event: EventMessage) {
+    async fn handle_container_event(self: Arc<Self>, managed: Arc<ManagedContainer>, event: EventMessage) {
         let Some(action) = event.action else { return };
-        match &action {
-            
+        let Some(ref mut state) = *managed.state.lock().await else {
+            tracing::warn!("Received event for deleted container {}", managed.container_name());
+            return
+        };
+
+        tracing::info!("Container {} for {} got event '{}'", state.docker_id, managed.container_name(), action.as_str());
+
+        match action.as_str() {
+            "oom" => {
+                tracing::error!("Container {} out of memory received - destroying container", state.docker_id);
+                state.running = ManagedContainerRunning::Dead;
+                self.clone().destroy(managed.clone());
+            },
+            "kill" | "die" => {
+                state.running = ManagedContainerRunning::Dead;
+                self.clone().destroy(managed.clone());
+            },
+            "paused" => {
+                state.running = ManagedContainerRunning::Paused;
+            },
+            "unpause" => {
+                state.running = ManagedContainerRunning::Running;
+            }
+            "start" => {
+                state.running = ManagedContainerRunning::Running;
+            },
+            "stop" => {
+                state.running = ManagedContainerRunning::Dead;
+            }
+            _ => {}
         }
     }
     
     /// Stop and remove the Docker container for the given managed container, and remove event
     /// listeners for the container
-    async fn destroy(&self, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
+    async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
         let Some(state) = managed.state.lock().await.take() else { return Ok(()) };
         self.docker.stop_container(&state.docker_id, None).await?;
         self.docker.remove_container(
@@ -249,7 +288,7 @@ impl DockerState {
         let tasks = containers
             .into_iter()
             .map(
-                |container| tokio::task::spawn(container.destroy(self.docker.clone()))
+                |container| tokio::task::spawn(self.clone().destroy(container))
             );
 
         for future in tasks {

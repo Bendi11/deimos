@@ -1,11 +1,11 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::SystemTime};
 
-use bollard::{container::RemoveContainerOptions, secret::ContainerState, Docker};
+use bollard::Docker;
 use chrono::{DateTime, Utc};
 use config::ManagedContainerConfig;
 use tokio::{io::AsyncReadExt, sync::Mutex};
 
-pub mod state;
+
 pub mod config;
 
 /// A managed container that represents a running or stopped container
@@ -18,16 +18,26 @@ pub struct ManagedContainer {
     /// Date and time of the last modification made to the config file
     pub last_modified: DateTime<Utc>,
     /// State of the container
-    pub(super) state: Mutex<Option<ManagedContainerState>>,
+    pub state: Mutex<Option<ManagedContainerState>>,
 }
 
 /// State populated after a Docker container is created for a [ManagedContainer]
 pub struct ManagedContainerState {
     /// ID of the container running for this
     pub docker_id: Arc<str>,
+    /// Status of the container in Docker
+    pub running: ManagedContainerRunning,
     /// Task listening for events propogated by the docker container
     pub listener: tokio::task::JoinHandle<()>,
 }
+
+#[derive(Clone, Copy)]
+pub enum ManagedContainerRunning {
+    Dead,
+    Paused,
+    Running
+}
+
 
 impl ManagedContainer {
     const CONFIG_FILENAME: &str = "container.toml";
@@ -154,27 +164,6 @@ impl ManagedContainer {
             host_config,
             ..Default::default()
         }
-    }
-    
-    /// Create a Docker container instance from the configuration given and rename it to match the
-    /// name given in the config
-    pub async fn create(&self, docker: Docker) -> Result<(), ManagedContainerError> {
-        
-        Ok(())
-    }
-
-    pub async fn status(&self, docker: Docker) -> Result<Option<()>, ManagedContainerError> {
-        let Some(ref state) = *self.state.lock().await else { return Ok(None) };
-        let inspect = docker.inspect_container(&state.docker_id, None).await?;
-
-        Ok(None)
-    }
-    
-    /// Stop and remove the Docker container for this managed container
-    pub async fn destroy(self: Arc<Self>, docker: Docker) -> Result<(), ManagedContainerError> {
-        
-
-        Ok(())
     }
     
     /// Get the ID of the Docker container that has been created for this managed container, or
