@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use bollard::{container::RemoveContainerOptions, secret::EventMessage, system::EventsOptions};
+use bollard::{container::{RemoveContainerOptions, StartContainerOptions}, secret::EventMessage, system::EventsOptions};
 use container::{ManagedContainer, ManagedContainerError, ManagedContainerRunning, ManagedContainerState};
 use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
@@ -14,7 +14,7 @@ pub use state::{DockerState, DockerInitError};
 
 impl Deimos {
     /// Create a container from the configuration loaded for the given managed container
-    pub async fn create_container(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
+    pub async fn create_container(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<Arc<str>, ManagedContainerError> {
         let config = managed.docker_config();
 
         let response = self.docker.docker
@@ -60,13 +60,13 @@ impl Deimos {
         let mut state = managed.state.lock().await;
         *state = Some(
             ManagedContainerState {
-                docker_id,
+                docker_id: docker_id.clone(),
                 running: ManagedContainerRunning::Dead,
                 listener,
             }
         );
 
-        Ok(())
+        Ok(docker_id)
     }
     
     /// Spawn a new task that monitors a stream of Docker events for the given container
@@ -91,53 +91,66 @@ impl Deimos {
     /// Handle an event received from Docker, updating the state of the given container if required
     /// and sending status notifications to the gRPC server
     async fn handle_container_event(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) {
-        {
-            let Some(action) = event.action else { return };
-            let mut lock = managed.state.lock().await;
-            let Some(ref mut state) = *lock else {
-                tracing::warn!("Received event for deleted container {}", managed.container_name());
-                return
-            };
+        let updated = self.container_event_internal(id.clone(), managed.clone(), event).await;
+        if updated {
+            tracing::trace!("Notifying gRPC subscribers of status change for {}", id);
+        }
+    }
+    
+    /// Modify the state of the managed container if necessary, and return `true` if we should send
+    /// a notification of state change
+    async fn container_event_internal(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) -> bool {
+        let Some(action) = event.action else { return false };
+        let mut lock = managed.state.lock().await;
+        let Some(ref mut state) = *lock else {
+            tracing::warn!("Received event for deleted container {}", managed.container_name());
+            return false
+        };
 
 
-            tracing::info!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
+        tracing::info!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
 
-            match action.as_str() {
-                "oom" => {
-                    tracing::error!("Container {} out of memory received - destroying container", state.docker_id);
-                    state.running = ManagedContainerRunning::Dead;
-                    drop(lock);
-                    if let Err(e) = self.clone().destroy(managed.clone()).await {
-                        tracing::error!("Failed to destroy container {}: {}", id, e);
-                    }
-                },
-                "kill" | "die" => {
-                    state.running = ManagedContainerRunning::Dead;
-                    drop(lock);
-                    if let Err(e) = self.clone().destroy(managed.clone()).await {
-                        tracing::error!("Failed to destroy container {}: {}", id, e);
-                    }
-                },
-                "paused" => {
-                    state.running = ManagedContainerRunning::Paused;
-                },
-                "unpause" => {
-                    state.running = ManagedContainerRunning::Running;
+        match action.as_str() {
+            "oom" => {
+                tracing::error!("Container {} out of memory received - destroying container", state.docker_id);
+                state.running = ManagedContainerRunning::Dead;
+                drop(lock);
+                if let Err(e) = self.destroy(managed.clone()).await {
+                    tracing::error!("Failed to destroy container {}: {}", id, e);
                 }
-                "start" => {
-                    state.running = ManagedContainerRunning::Running;
-                },
-                "stop" => {
-                    state.running = ManagedContainerRunning::Dead;
+                true
+            },
+            "kill" | "die" => {
+                state.running = ManagedContainerRunning::Dead;
+                drop(lock);
+                if let Err(e) = self.destroy(managed.clone()).await {
+                    tracing::error!("Failed to destroy container {}: {}", id, e);
                 }
-                _ => return
+                true
+            },
+            "paused" => {
+                state.running = ManagedContainerRunning::Paused;
+                true
+            },
+            "unpause" => {
+                state.running = ManagedContainerRunning::Running;
+                true
             }
+            "start" => {
+                state.running = ManagedContainerRunning::Running;
+                true
+            },
+            "stop" => {
+                state.running = ManagedContainerRunning::Dead;
+                true
+            }
+            _ => false
         }
     }
     
     /// Stop and remove the Docker container for the given managed container, and remove event
     /// listeners for the container
-    async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
+    pub async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
         let Some(state) = managed.state.lock().await.take() else { return Ok(()) };
         self.docker.docker.stop_container(&state.docker_id, None).await?;
         self.docker.docker.remove_container(
@@ -153,6 +166,27 @@ impl Deimos {
         state.listener.abort();
 
         tracing::trace!("Aborted event listener for {}", managed.container_name());
+
+        Ok(())
+    }
+    
+    /// Create a Docker container for the given container if none exists, and start it
+    pub async fn start(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
+        let lock = managed.state.lock().await;
+        let docker_id = match *lock {
+            Some(ref state) => state.docker_id.clone(),
+            None => {
+                drop(lock);
+                self.clone().create_container(managed.clone()).await?
+            }
+        };
+
+        self
+            .docker
+            .docker
+            .start_container(&docker_id, Option::<StartContainerOptions<String>>::None).await?;
+
+        tracing::trace!("Starting container {} for '{}'", docker_id, managed.container_name());
 
         Ok(())
     }

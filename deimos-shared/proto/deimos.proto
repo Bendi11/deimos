@@ -5,6 +5,7 @@ package deimos;
 import public "status.proto";
 import public "query.proto";
 import public "img.proto";
+import public "update.proto";
 
 
 service DeimosService {
@@ -16,4 +17,6 @@ service DeimosService {
     rpc ContainerStatus(ContainerStatusRequest) returns(ContainerStatusResponse);
 
     rpc ContainerStatusStream(ContainerStatusStreamRequest) returns(stream ContainerStatusNotification);
+
+    rpc UpdateContainer(UpdateContainerRequest) returns(UpdateContainerResponse);
 }

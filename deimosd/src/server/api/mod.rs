@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
-use deimos_shared::{util, ContainerBrief, ContainerImagesRequest, ContainerImagesResponse, ContainerDockerStatus, ContainerDockerRunStatus, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse};
+use deimos_shared::{util, ContainerBrief, ContainerDockerRunStatus, ContainerDockerStatus, ContainerImagesRequest, ContainerImagesResponse, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse, UpdateContainerMethod, UpdateContainerRequest, UpdateContainerResponse};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use igd_next::PortMappingProtocol;
 use tokio::sync::{broadcast, Mutex};
@@ -116,18 +116,18 @@ impl Deimos {
             status: state
                 .as_ref()
                 .map(|state| ContainerDockerStatus {
-                    run_status: ContainerDockerRunStatus::from(state.running.into()).into(),
+                    run_status: ContainerDockerRunStatus::from(state.running).into(),
                 })
         }
     }
 }
 
-impl Into<ContainerDockerRunStatus> for ManagedContainerRunning {
-    fn into(self) -> ContainerDockerRunStatus {
-        match self {
-            Self::Dead => ContainerDockerRunStatus::Dead,
-            Self::Paused => ContainerDockerRunStatus::Paused,
-            Self::Running => ContainerDockerRunStatus::Running,
+impl From<ManagedContainerRunning> for ContainerDockerRunStatus {
+    fn from(value: ManagedContainerRunning) -> ContainerDockerRunStatus {
+        match value {
+            ManagedContainerRunning::Dead => ContainerDockerRunStatus::Dead,
+            ManagedContainerRunning::Paused => ContainerDockerRunStatus::Paused,
+            ManagedContainerRunning::Running => ContainerDockerRunStatus::Running,
         }
     }
 }
@@ -188,6 +188,32 @@ impl DeimosService for Deimos {
                 ContainerStatusStreamer::new(rx)
             )
         )
+    }
+
+    async fn update_container(self: Arc<Self>, req: tonic::Request<UpdateContainerRequest>) -> Result<tonic::Response<UpdateContainerResponse>, tonic::Status> {
+        let req = req.into_inner();
+        let Ok(method) = UpdateContainerMethod::try_from(req.method) else { return Err(tonic::Status::invalid_argument("Request method")) };
+        match self.docker.containers.get(&req.id).map(|v| v.value().clone()) {
+            Some(c) => match method {
+                UpdateContainerMethod::Start => {
+                    if let Err(e) = self.start(c.clone()).await {
+                        tracing::error!("Failed to start container '{}' in response to gRPC request: {}", c.container_name(), e);
+                        return Err(tonic::Status::internal("failed"))
+                    }
+                    Ok(tonic::Response::new(UpdateContainerResponse {}))
+                },
+                UpdateContainerMethod::Stop => {
+                    if let Err(e) = self.destroy(c.clone()).await {
+                        tracing::error!("Failed to destroy container '{}' in response to gRPC request: {}", c.container_name(), e);
+                        return Err(tonic::Status::internal("failed"))
+                    }
+                    Ok(tonic::Response::new(UpdateContainerResponse {} ))
+                }
+            },
+            None => Err(
+                tonic::Status::not_found(format!("No such container: {}", req.id))
+            )
+        }
     }
 }
 

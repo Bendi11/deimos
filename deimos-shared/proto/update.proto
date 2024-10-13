@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package deimos;
+
+enum UpdateContainerMethod {
+    STOP = 0;
+    START = 1;
+}
+
+message UpdateContainerRequest {
+    string id = 1;
+    UpdateContainerMethod method = 2;
+}
+
+message UpdateContainerResponse {}
