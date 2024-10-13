@@ -102,7 +102,9 @@ impl DeimosApplication {
             DeimosMessage::Settings(msg) => self.settings.update(&mut self.ctx, msg).map(DeimosMessage::Settings),
             DeimosMessage::Sidebar(m) => match m {
                 SidebarMessage::Refresh => self.ctx.synchronize_from_server().map(DeimosMessage::Context),
-                other => self.sidebar.update(other).map(DeimosMessage::Sidebar),
+                SidebarMessage::ContainerOn(container) => self.ctx.update_container(container, true).map(DeimosMessage::Context),
+                SidebarMessage::ContainerOff(container) => self.ctx.update_container(container, false).map(DeimosMessage::Context),
+                other => self.sidebar.update(&mut self.ctx, other).map(DeimosMessage::Sidebar),
             }
         }
     }

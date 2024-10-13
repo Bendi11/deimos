@@ -111,13 +111,9 @@ impl Deimos {
         Ok(())
     }
 
-    fn state_to_response(state: &Option<ManagedContainerState>) -> ContainerStatusResponse {
-        ContainerStatusResponse {
-            status: state
-                .as_ref()
-                .map(|state| ContainerDockerStatus {
-                    run_status: ContainerDockerRunStatus::from(state.running).into(),
-                })
+    fn state_to_api(state: &ManagedContainerState) -> ContainerDockerStatus {
+        ContainerDockerStatus {
+            run_status: ContainerDockerRunStatus::from(state.running).into(),
         }
     }
 }
@@ -136,16 +132,18 @@ impl From<ManagedContainerRunning> for ContainerDockerRunStatus {
 #[async_trait]
 impl DeimosService for Deimos {
     async fn query_containers(self: Arc<Self>, _request: tonic::Request<QueryContainersRequest>) -> Result<tonic::Response<QueryContainersResponse>, tonic::Status> {
-        let containers = self
-            .docker
-            .containers
-            .iter()
-            .map(|entry| ContainerBrief {
-                id: entry.value().config.id.to_string(),
-                title: entry.value().config.name.to_string(),
-                updated: entry.value().last_modified.timestamp()
-            })
-            .collect::<Vec<_>>();
+        let mut containers = Vec::new();
+        for c in self.docker.containers.iter() {
+            let c = c.value();
+            containers.push(
+                ContainerBrief {
+                    id: c.config.id.to_string(),
+                    title: c.config.name.to_string(),
+                    updated: c.last_modified.timestamp(),
+                    running: c.state.lock().await.as_ref().map(Self::state_to_api),
+                }
+            )
+        }
 
         Ok(
             tonic::Response::new(QueryContainersResponse { containers, })
@@ -169,7 +167,11 @@ impl DeimosService for Deimos {
             Some(container) => {
                 let state = container.state.lock().await;
                 Ok(
-                    tonic::Response::new(Self::state_to_response(&state))
+                    tonic::Response::new(
+                        ContainerStatusResponse {
+                            status: state.as_ref().map(Self::state_to_api),
+                        }
+                    )
                 )
             },
             None => Err(

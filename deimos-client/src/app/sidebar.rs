@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use iced::{alignment::{Horizontal, Vertical}, border::Radius, gradient::Linear, widget::svg, Background, ContentFit, Degrees, Gradient, Length, Padding, Radians, Shadow, Task, Vector};
+use iced::{alignment::{Horizontal, Vertical}, border::Radius, widget::svg, Background, Length, Padding, Shadow, Task, Vector};
 
-use crate::context::{container::CachedContainer, Context};
+use crate::context::{container::CachedContainer, ContainerRef, Context};
 
-use super::style::{button::ButtonClass, container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text};
+use super::{style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text}, DeimosMessage};
 
 #[derive(Debug)]
 pub struct Sidebar {
@@ -15,6 +15,8 @@ pub struct Sidebar {
 #[derive(Debug, Clone)]
 pub enum SidebarMessage {
     Refresh,
+    ContainerOn(ContainerRef),
+    ContainerOff(ContainerRef),
 }
 
 impl Sidebar {
@@ -77,8 +79,8 @@ impl Sidebar {
                     .right(10f32)
             );
 
-        for (_, container) in ctx.containers.iter() {
-            containers = containers.push(Self::container_button(container));
+        for (r, container) in ctx.containers.iter() {
+            containers = containers.push(Self::container_button(r, container));
         }
 
 
@@ -107,37 +109,67 @@ impl Sidebar {
             .into()
     }
 
-    pub fn update(&mut self, msg: SidebarMessage) -> Task<SidebarMessage> {
+    pub fn update(&mut self, ctx: &mut Context, msg: SidebarMessage) -> Task<SidebarMessage> {
         match msg {
             other => panic!("Message {:?} sent to sidebar", other),
         }
     }
 
-    fn container_button(container: &CachedContainer) -> Element<SidebarMessage> {
-        let class = ContainerClass {
-            background: Some(
-                Background::Color(orbit::NIGHT[0])
-            ),
-            radius: Radius::new(4f32),
-            shadow: Some(
-                Shadow {
-                    color: orbit::NIGHT[2],
-                    offset: Vector::ZERO,
-                    blur_radius: 4f32
-                }
-            ),
+    fn container_button(r: ContainerRef, container: &CachedContainer) -> Element<SidebarMessage> {
+        let (msg, text) = match container.data.running {
+            Some(_) => (SidebarMessage::ContainerOff(r), "Stop"),
+            None => (SidebarMessage::ContainerOn(r), "Start")
         };
 
-        Container::new(
-            Button::new(
-                Text::new(&container.data.name)
+        let row = Row::new()
+            .push(
+                Button::new(
+                    Text::new(&container.data.name)
+                )
+                .width(Length::FillPortion(3))
             )
-        )
-        .align_right(Length::Fill)
-        .center_y(Length::Fill)
-        .class(class)
-        .height(64f32)
-        .width(Length::Fill)
-        .into()
+            .push(
+                Container::new(
+                    Button::new(
+                        Text::new(text)
+                    )
+                    .on_press(msg)
+                    .height(Length::Fill)
+                    .width(Length::FillPortion(1))
+                )
+                .class(
+                    ContainerClass {
+                        background: None,
+                        radius: Radius::new(0f32),
+                        shadow: Some(
+                            Shadow {
+                                color: orbit::NIGHT[2],
+                                offset: Vector::new(-0.5f32, 0f32),
+                                blur_radius: 3f32
+                            }
+                        )
+                    }
+                )
+            );
+
+        Container::new(row)
+            .height(64f32)
+            .width(Length::Fill)
+            .class(
+                ContainerClass {
+                    background: Some(
+                        Background::Color(orbit::NIGHT[0])
+                    ),
+                    radius: Radius::new(4f32),
+                    shadow: Some(
+                        Shadow {
+                            color: orbit::NIGHT[2],
+                            offset: Vector::ZERO,
+                            blur_radius: 4f32
+                        }
+                    ),
+                }
+            )
+            .into()
     }
 }

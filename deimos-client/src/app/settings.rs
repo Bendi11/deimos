@@ -14,8 +14,9 @@ pub struct Settings;
 
 #[derive(Debug, Clone)]
 pub enum SettingsMessage {
-    UpdatedServerUri(Uri),
-    UpdatedRequestTimeout(u64),
+    ServerUri(Uri),
+    RequestTimeout(u64),
+    ConnectTimeout(u64),
 }
 
 
@@ -33,16 +34,23 @@ impl Settings {
             .push(
                 Column::new().push(Text::new("Server URI")).push(
                     TypedInput::new("URL", &ctx.state.settings.server_uri)
-                        .on_input(SettingsMessage::UpdatedServerUri)
+                        .on_input(SettingsMessage::ServerUri)
                         .width(Length::Fill),
                 ),
             )
             .push(
                 Column::new().push(Text::new("gRPC Request Timeout")).push(
                     TypedInput::new("Timeout", &ctx.state.settings.request_timeout.as_secs())
-                        .on_input(SettingsMessage::UpdatedRequestTimeout)
+                        .on_input(SettingsMessage::RequestTimeout)
                         .width(Length::Fill),
                 ),
+            )
+            .push(
+                Column::new().push(Text::new("gRPC Connect Timeout")).push(
+                    TypedInput::new("Timeout", &ctx.state.settings.connect_timeout.as_secs())
+                        .on_input(SettingsMessage::ConnectTimeout)
+                        .width(Length::Fill)
+                )
             );
 
         Container::new(column)
@@ -52,11 +60,14 @@ impl Settings {
 
     pub fn update(&mut self, ctx: &mut Context, msg: SettingsMessage) -> Task<SettingsMessage> {
         match msg {
-            SettingsMessage::UpdatedServerUri(uri) => {
+            SettingsMessage::ServerUri(uri) => {
                 ctx.state.settings.server_uri = uri;
             }
-            SettingsMessage::UpdatedRequestTimeout(timeout) => {
+            SettingsMessage::RequestTimeout(timeout) => {
                 ctx.state.settings.request_timeout = Duration::from_secs(timeout);
+            },
+            SettingsMessage::ConnectTimeout(timeout) => {
+                ctx.state.settings.connect_timeout = Duration::from_secs(timeout);
             }
         }
 

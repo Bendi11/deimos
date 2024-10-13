@@ -3,9 +3,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use deimos_shared::{
-    ContainerBrief, ContainerImage, ContainerImagesRequest, ContainerImagesResponse, DeimosServiceClient,
-};
+use deimos_shared::DeimosServiceClient;
 use iced::widget::image;
 use mime::Mime;
 use tokio::sync::Mutex;
@@ -28,31 +26,47 @@ pub struct CachedContainerData {
     pub id: String,
     pub name: String,
     pub last_update: DateTime<Utc>,
+    pub running: Option<CachedContainerRunState>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedContainerRunState {
+    pub kind: CachedContainerRunKind,    
+}
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CachedContainerRunKind {
+    Dead,
+    Paused,
+    Running
 }
 
 impl Context {
     /// Save all cached container state to the local cache directory
     pub fn save_cached_containers(&self) {
-        for (id, container) in self.containers.iter() {
+        for container in self.containers.values() {
             if let Err(e) = container.save(&self.cache_dir) {
-                tracing::error!("Failed to save container {}: {}", id, e);
+                tracing::error!("Failed to save container {}: {}", container.data.id, e);
             }
         }
     }
 
     /// Check if the received container is already cached at its newest version, and request full
     /// container data including images if it is not
-    pub(super) async fn synchronize_container_from_brief(api: Arc<Mutex<DeimosServiceClient<Channel>>>, brief: ContainerBrief) -> CachedContainer {
+    pub(super) async fn synchronize_container_from_brief(api: Arc<Mutex<DeimosServiceClient<Channel>>>, brief: deimos_shared::ContainerBrief) -> CachedContainer {
+        let running = brief.running.and_then(Self::docker_status_response_to_state);
+
         let images = {
             let mut api = api.lock().await;
-            let request = ContainerImagesRequest {
+            let request = deimos_shared::ContainerImagesRequest {
                 container_id: brief.id.clone(),
             };
             match api.get_container_image(request).await {
                 Ok(images) => images.into_inner(),
                 Err(e) => {
                     tracing::error!("Failed to get images for {}: {}", brief.id, e);
-                    ContainerImagesResponse {
+                    deimos_shared::ContainerImagesResponse {
                         banner: None,
                         icon: None,
                     }
@@ -60,7 +74,7 @@ impl Context {
             }
         };
 
-        let load_if_supported = |image: ContainerImage| {
+        let load_if_supported = |image: deimos_shared::ContainerImage| {
             let mime = match Mime::from_str(&image.mime_type) {
                 Ok(m) => m,
                 Err(e) => {
@@ -84,15 +98,35 @@ impl Context {
         let data = CachedContainerData {
             id: brief.id,
             name: brief.title,
+            running,
             last_update: DateTime::from_timestamp(brief.updated, 0).unwrap_or_default(),
         };
-        
 
         CachedContainer {
             data,
             banner,
             icon
         }
+    }
+
+    pub(super) fn docker_status_response_to_state(status: deimos_shared::ContainerDockerStatus) -> Option<CachedContainerRunState> {
+        let kind = match deimos_shared::ContainerDockerRunStatus::try_from(status.run_status) {
+            Ok(stat) => match stat {
+                deimos_shared::ContainerDockerRunStatus::Dead => CachedContainerRunKind::Dead,
+                deimos_shared::ContainerDockerRunStatus::Paused => CachedContainerRunKind::Paused,
+                deimos_shared::ContainerDockerRunStatus::Running => CachedContainerRunKind::Running,
+            },
+            Err(e) => {
+                tracing::error!("Failed to decode run status for container: {}", e);
+                return None
+            }
+        };
+        
+        Some(
+            CachedContainerRunState {
+                kind,
+            }
+        )
     }
 
     /// Attempt to load all containers from the given local cache directory
@@ -151,11 +185,11 @@ impl Context {
                         }
                     };
 
-                    match self.containers.get(&meta.id) {
+                    match self.get_container(&meta.id) {
                         Some(existing) if existing.data.last_update >= meta.last_update => continue,
                         _ => {
                             let full = CachedContainer::load(meta, &path).await;
-                            self.containers.insert(full.data.id.clone(), full);
+                            self.containers.insert(full);
                         }
                     }
                 }
