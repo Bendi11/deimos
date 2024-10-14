@@ -69,25 +69,12 @@ impl Context {
         self.save_state();
         self.save_cached_containers();
     }
-    
-    /// Subscribe to container status updates from the server
-    async fn subscription(api: Arc<Mutex<DeimosServiceClient<Channel>>>) -> impl Stream<Item = ContextMessage> {
+
+    async fn subscribe_container_events(api: Arc<Mutex<DeimosServiceClient<Channel>>>) -> impl Stream<Item = Result<deimosproto::ContainerStatusNotification, tonic::Status>> {
         loop {
             let result = api.lock().await.container_status_stream(deimosproto::ContainerStatusStreamRequest {}).await;
             match result {
-                Ok(stream) => {
-                    tracing::trace!("Subscribed to container events from server");
-                    return stream.into_inner()
-                        .filter_map(|s| async move {
-                            match s {
-                                Ok(s) => Some(ContextMessage::Notification(s)),
-                                Err(e) => {
-                                    tracing::error!("Failed to receive container status notification from server: {e}");
-                                    None
-                                }
-                            }
-                        })
-                },
+                Ok(stream) => break stream.into_inner(),
                 Err(e) => {
                     tracing::error!("Failed to subscribe to container status notifications: {e}");
                 }
@@ -95,10 +82,30 @@ impl Context {
         }
     }
     
+    /// Subscribe to container status updates from the server
+    fn subscription(api: Arc<Mutex<DeimosServiceClient<Channel>>>) -> impl Stream<Item = ContextMessage> {
+        async_stream::stream! {
+            loop {
+                let mut stream = Self::subscribe_container_events(api.clone()).await;
+                while let Some(event) = stream.next().await {
+                    match event {
+                        Ok(event) => {
+                            yield ContextMessage::Notification(event)
+                        },
+                        Err(e) => {
+                            tracing::error!("Failed to read container status notification: {e}");
+                        }
+                    }
+                }
+
+                tracing::warn!("Container status notification stream closed, attempting to reopen");
+            }
+        }
+    }
+    
     /// Start a task to process container status notifications
-    fn process_events(api: Arc<Mutex<DeimosServiceClient<Channel>>>) -> iced::Task<ContextMessage> {
-        iced::Task::future(Self::subscription(api))
-            .then(iced::Task::stream)
+    fn container_notification_task(api: Arc<Mutex<DeimosServiceClient<Channel>>>) -> iced::Task<ContextMessage> {
+        iced::Task::stream(Self::subscription(api))
     }
 
     /// Load all context state from the local cache directory and begin connection attempts to the
@@ -167,7 +174,7 @@ impl Context {
             ContextMessage::Connected(api) => {
                 let api = Arc::new(Mutex::new(api));
                 self.api = Some(api.clone());
-                Self::process_events(api)
+                Self::container_notification_task(api)
             },
             ContextMessage::BeginSynchronizeFromQuery(resp) => self.begin_synchronize_from_query(resp),
             ContextMessage::SynchronizeContainer(container) => {
@@ -198,7 +205,7 @@ impl Context {
                     tracing::error!("Got status notification for unknown container '{}', attempting synchronization", notify.container_id);
                     self.synchronize_from_server()
                 }
-            }
+            },
             ContextMessage::Error => iced::Task::none(),
         }
     }

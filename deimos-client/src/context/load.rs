@@ -23,7 +23,7 @@ impl Context {
                 );
 
                 if !std::fs::exists(cache_dir).unwrap_or(false) {
-                    if let Err(e) = std::fs::create_dir(&cache_dir) {
+                    if let Err(e) = std::fs::create_dir(cache_dir) {
                         tracing::warn!(
                             "Failed to create config directory {}: {}",
                             cache_dir.display(),

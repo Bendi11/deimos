@@ -982,6 +982,7 @@ checksum = "7046468a81e6a002061c01e6a7c83139daf91b11c30e66795b13217c2d885c8b"
 name = "deimos-client"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "chrono",
  "deimosproto",
  "dirs 5.0.1",

@@ -129,7 +129,6 @@ impl Deimos {
                 true
             },
             "die" => {
-                *lock = None;
                 true
             },
             "kill" => {
@@ -160,22 +159,24 @@ impl Deimos {
     pub async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
         let mut lock = managed.state.lock().await;
         let Some(ref mut state) = *lock else { return Ok(()) };
-        tracing::trace!("Waiting on container '{}' to stop", state.docker_id);
-        self.docker.docker.stop_container(&state.docker_id, Some(StopContainerOptions { t: 60 * 3 })).await?;
-        tracing::trace!("Container '{}' stopped", state.docker_id);
+
+        let handle = state.listener.abort_handle();
+        let id = state.docker_id.clone();
+        drop(lock);
+
+        tracing::trace!("Waiting on container '{}' to stop", id);
+        self.docker.docker.stop_container(&id, Some(StopContainerOptions { t: 60 * 3 })).await?;
+        tracing::trace!("Container '{}' stopped", id);
 
         self.docker.docker.remove_container(
-            &state.docker_id,
+            &id,
             Some(RemoveContainerOptions {
                 force: false,
                 ..Default::default()
             })
         ).await?;
 
-        tracing::info!("Stopped and removed container {} for {}", state.docker_id, managed.container_name());
-        
-        let handle = state.listener.abort_handle();
-        drop(lock);
+        tracing::info!("Stopped and removed container {} for {}", id, managed.container_name());
 
         tokio::task::yield_now().await;
 
