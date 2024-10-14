@@ -313,21 +313,10 @@ impl Context {
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
     async fn connect_api(settings: ContextSettings) -> DeimosServiceClient<Channel> {
-        let channel = loop {
-            let channel = Channel::builder(settings.server_uri.clone())
-                .connect_timeout(settings.connect_timeout)
-                .timeout(settings.request_timeout)
-                .connect()
-                .await;
-
-            match channel {
-                Ok(c) => break c,
-                Err(e) => {
-                    tracing::error!("Failed to connect to API: {e}");
-                    continue
-                }
-            }
-        };
+        let channel = Channel::builder(settings.server_uri.clone())
+            .connect_timeout(settings.connect_timeout)
+            .timeout(settings.request_timeout)
+            .connect_lazy();
 
         DeimosServiceClient::new(channel)
     }
