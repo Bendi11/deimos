@@ -4,7 +4,6 @@ use iced::{
     widget::{svg, Svg},
     Length, Task,
 };
-use loader::{LoadWrapper, LoaderMessage};
 use settings::{Settings, SettingsMessage};
 use sidebar::{Sidebar, SidebarMessage};
 use style::{
@@ -13,7 +12,6 @@ use style::{
 
 use crate::context::{Context, ContextMessage};
 
-mod loader;
 mod settings;
 mod sidebar;
 mod style;
@@ -45,8 +43,8 @@ pub enum DeimosMessage {
 
 impl DeimosApplication {
     /// Load application state from a save file and return the application
-    async fn load() -> Self {
-        let ctx = Context::load().await;
+    fn load() -> Self {
+        let ctx = Context::load();
         let view = DeimosView::Empty;
 
         let settings_icon = svg::Handle::from_memory(include_bytes!("../assets/settings.svg"));
@@ -63,17 +61,17 @@ impl DeimosApplication {
     }
 
     pub fn run() -> ExitCode {
-        match iced::application("Deimos", LoadWrapper::update, LoadWrapper::view)
+        let this = Self::load();
+        let task = this.ctx.post_load_init();
+
+        match iced::application("Deimos", Self::update, Self::view)
             .antialiasing(true)
             .executor::<iced::executor::Default>()
             .theme(|_| Theme::default())
             .exit_on_close_request(false)
             .subscription(Self::subscription_window_event)
             .run_with(move || {
-                (
-                    LoadWrapper::new(),
-                    Task::perform(Self::load(), LoaderMessage::Loaded),
-                )
+                (this, task.map(DeimosMessage::Context))
             }) {
             Ok(_) => ExitCode::SUCCESS,
             Err(e) => {
@@ -102,8 +100,7 @@ impl DeimosApplication {
             DeimosMessage::Settings(msg) => self.settings.update(&mut self.ctx, msg).map(DeimosMessage::Settings),
             DeimosMessage::Sidebar(m) => match m {
                 SidebarMessage::Refresh => self.ctx.synchronize_from_server().map(DeimosMessage::Context),
-                SidebarMessage::ContainerOn(container) => self.ctx.update_container(container, true).map(DeimosMessage::Context),
-                SidebarMessage::ContainerOff(container) => self.ctx.update_container(container, false).map(DeimosMessage::Context),
+                SidebarMessage::UpdateContainer(container, state) => self.ctx.update_container(container, state).map(DeimosMessage::Context),
                 other => self.sidebar.update(&mut self.ctx, other).map(DeimosMessage::Sidebar),
             }
         }
@@ -137,7 +134,7 @@ impl DeimosApplication {
             .into()
     }
 
-    fn subscription_window_event(_: &LoadWrapper) -> iced::Subscription<LoaderMessage> {
-        iced::window::close_requests().map(|_| LoaderMessage::Application(DeimosMessage::Close))
+    fn subscription_window_event(&self) -> iced::Subscription<DeimosMessage> {
+        iced::window::close_requests().map(|_| DeimosMessage::Close)
     }
 }

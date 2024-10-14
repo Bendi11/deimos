@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package deimos;
+
+import "container.proto";
+
+message QueryContainersRequest {}
+
+message QueryContainersResponse {
+    repeated ContainerBrief containers = 1;
+}

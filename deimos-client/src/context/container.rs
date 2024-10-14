@@ -3,7 +3,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use deimos_shared::DeimosServiceClient;
+use deimosproto::DeimosServiceClient;
 use iced::widget::image;
 use mime::Mime;
 use tokio::sync::Mutex;
@@ -25,18 +25,11 @@ pub struct CachedContainer {
 pub struct CachedContainerData {
     pub id: String,
     pub name: String,
-    pub last_update: DateTime<Utc>,
-    pub running: Option<CachedContainerRunState>,
+    pub up: CachedContainerUpState,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CachedContainerRunState {
-    pub kind: CachedContainerRunKind,    
-}
-
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum CachedContainerRunKind {
+pub enum CachedContainerUpState {
     Dead,
     Paused,
     Running
@@ -52,106 +45,31 @@ impl Context {
         }
     }
 
-    /// Check if the received container is already cached at its newest version, and request full
-    /// container data including images if it is not
-    pub(super) async fn synchronize_container_from_brief(api: Arc<Mutex<DeimosServiceClient<Channel>>>, brief: deimos_shared::ContainerBrief) -> CachedContainer {
-        let running = brief.running.and_then(Self::docker_status_response_to_state);
-
-        let images = {
-            let mut api = api.lock().await;
-            let request = deimos_shared::ContainerImagesRequest {
-                container_id: brief.id.clone(),
-            };
-            match api.get_container_image(request).await {
-                Ok(images) => images.into_inner(),
-                Err(e) => {
-                    tracing::error!("Failed to get images for {}: {}", brief.id, e);
-                    deimos_shared::ContainerImagesResponse {
-                        banner: None,
-                        icon: None,
-                    }
-                }
-            }
-        };
-
-        let load_if_supported = |image: deimos_shared::ContainerImage| {
-            let mime = match Mime::from_str(&image.mime_type) {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::error!(
-                        "Invalid image MIME type '{}' from server for container {}: {}",
-                        image.mime_type,
-                        brief.id,
-                        e
-                    );
-                    return None;
-                }
-            };
-
-            CachedContainer::supported_image_mime(mime)
-                .then(|| image::Handle::from_bytes(image.image_data))
-        };
-
-        let banner = images.banner.and_then(load_if_supported);
-        let icon = images.icon.and_then(load_if_supported);
-
-        let data = CachedContainerData {
-            id: brief.id,
-            name: brief.title,
-            running,
-            last_update: DateTime::from_timestamp(brief.updated, 0).unwrap_or_default(),
-        };
-
-        CachedContainer {
-            data,
-            banner,
-            icon
-        }
-    }
-
-    pub(super) fn docker_status_response_to_state(status: deimos_shared::ContainerDockerStatus) -> Option<CachedContainerRunState> {
-        let kind = match deimos_shared::ContainerDockerRunStatus::try_from(status.run_status) {
-            Ok(stat) => match stat {
-                deimos_shared::ContainerDockerRunStatus::Dead => CachedContainerRunKind::Dead,
-                deimos_shared::ContainerDockerRunStatus::Paused => CachedContainerRunKind::Paused,
-                deimos_shared::ContainerDockerRunStatus::Running => CachedContainerRunKind::Running,
-            },
-            Err(e) => {
-                tracing::error!("Failed to decode run status for container: {}", e);
-                return None
-            }
-        };
-        
-        Some(
-            CachedContainerRunState {
-                kind,
-            }
-        )
-    }
-
     /// Attempt to load all containers from the given local cache directory
-    pub(super) async fn load_cached_containers(&mut self) {
-        if !self.cache_dir.exists() {
-            if let Err(e) = tokio::fs::create_dir(&self.cache_dir).await {
+    pub(super) async fn load_cached_containers(cache_dir: PathBuf) -> Vec<CachedContainer> {
+        if !cache_dir.exists() {
+            if let Err(e) = tokio::fs::create_dir(&cache_dir).await {
                 tracing::error!(
                     "Failed to create cache directory '{}': {}",
-                    self.cache_dir.display(),
+                    cache_dir.display(),
                     e
                 );
             }
         }
 
-        let mut iter = match tokio::fs::read_dir(&self.cache_dir).await {
+        let mut iter = match tokio::fs::read_dir(&cache_dir).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(
                     "Failed to load cached containers from {}: {}",
-                    self.cache_dir.display(),
+                    cache_dir.display(),
                     e
                 );
-                return;
+                return vec![];
             }
         };
+
+        let mut containers = Vec::new();
 
         loop {
             let entry = match iter.next_entry().await {
@@ -160,7 +78,7 @@ impl Context {
                 Err(e) => {
                     tracing::warn!(
                         "Failed to get entry from directory {}: {}",
-                        self.cache_dir.display(),
+                        cache_dir.display(),
                         e
                     );
                     continue;
@@ -185,13 +103,9 @@ impl Context {
                         }
                     };
 
-                    match self.get_container(&meta.id) {
-                        Some(existing) if existing.data.last_update >= meta.last_update => continue,
-                        _ => {
-                            let full = CachedContainer::load(meta, &path).await;
-                            self.containers.insert(full);
-                        }
-                    }
+                    
+                    let full = CachedContainer::load(meta, &path).await;
+                    containers.push(full)
                 }
                 Ok(_) => (),
                 Err(e) => {
@@ -203,6 +117,8 @@ impl Context {
                 }
             }
         }
+
+        containers
     }
 }
 
@@ -284,6 +200,26 @@ impl CachedContainer {
     /// Get the directory that cache files for this container should be placed into
     fn directory(&self, cache_dir: &Path) -> PathBuf {
         cache_dir.join(&self.data.id)
+    }
+}
+
+impl From<deimosproto::ContainerUpState> for CachedContainerUpState {
+    fn from(value: deimosproto::ContainerUpState) -> Self {
+        match value {
+            deimosproto::ContainerUpState::Dead => Self::Dead,
+            deimosproto::ContainerUpState::Paused => Self::Paused,
+            deimosproto::ContainerUpState::Running => Self::Running,
+        }
+    }
+}
+
+impl From<CachedContainerUpState> for deimosproto::ContainerUpState {
+    fn from(val: CachedContainerUpState) -> Self {
+        match val {
+            CachedContainerUpState::Dead => deimosproto::ContainerUpState::Dead,
+            CachedContainerUpState::Paused => deimosproto::ContainerUpState::Paused,
+            CachedContainerUpState::Running => deimosproto::ContainerUpState::Running
+        }
     }
 }
 

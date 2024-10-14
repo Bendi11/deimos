@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt, FmtSubscriber};
 
-use deimos_shared::util;
+use deimosproto::util;
 use serde::Deserialize;
 use server::{Deimos, DeimosConfig};
 

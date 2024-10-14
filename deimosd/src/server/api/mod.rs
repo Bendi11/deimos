@@ -1,6 +1,5 @@
 use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
-use deimos_shared::{util, ContainerBrief, ContainerDockerRunStatus, ContainerDockerStatus, ContainerImagesRequest, ContainerImagesResponse, ContainerStatusNotification, ContainerStatusRequest, ContainerStatusResponse, ContainerStatusStreamRequest, DeimosService, DeimosServiceServer, QueryContainersRequest, QueryContainersResponse, UpdateContainerMethod, UpdateContainerRequest, UpdateContainerResponse};
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use igd_next::PortMappingProtocol;
 use tokio::sync::{broadcast, Mutex};
@@ -10,9 +9,11 @@ use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use tonic::transport::Identity;
 use zeroize::Zeroize;
 
-use super::docker::container::{ManagedContainerRunning, ManagedContainerState};
+use super::docker::container::{ManagedContainer, ManagedContainerRunning, ManagedContainerState};
 use super::upnp::{Upnp, UpnpLease};
 use super::Deimos;
+
+use deimosproto as proto;
 
 /// A connection to a remote client, with references to state required to serve RPC requests
 pub struct ApiState {
@@ -20,7 +21,7 @@ pub struct ApiState {
     /// Address leased for the API
     pub lease: Option<UpnpLease>,
     /// Status notification sender for gRPC subscribers
-    pub sender: tokio::sync::broadcast::Sender<ContainerStatusNotification>,
+    pub sender: tokio::sync::broadcast::Sender<deimosproto::ContainerStatusNotification>,
 }
 
 /// Configuration used to initialize and inform the Deimos API service
@@ -64,8 +65,8 @@ impl ApiState {
 }
 
 pub struct ContainerStatusStreamer {
-    channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>,
-    state: Pin<Box<dyn Future<Output = Option<ContainerStatusNotification>> + 'static + Send>>,
+    channel: Arc<Mutex<broadcast::Receiver<proto::ContainerStatusNotification>>>,
+    state: Pin<Box<dyn Future<Output = Option<proto::ContainerStatusNotification>> + 'static + Send>>,
 }
 
 impl Deimos {
@@ -97,11 +98,17 @@ impl Deimos {
         client_ca_root_pem.zeroize();*/
 
         match Ok(server) {
-            Ok(mut server) => if let Err(e) = server
-                .add_service(DeimosServiceServer::from_arc(self.clone()))
-                .serve_with_shutdown(self.api.config.bind, cancel.cancelled())
-                .await {
-                tracing::error!("Failed to run gRPC server: {e}");
+            Ok(mut server) => {
+                let result = server
+                    .add_service(proto::DeimosServiceServer::from_arc(self.clone()))
+                    .serve_with_shutdown(self.api.config.bind, cancel.cancelled());
+
+                tokio::select! {
+                    _ = cancel.cancelled() => {},
+                    result = result => if let Err(e) = result {
+                        tracing::error!("gRPC server error: {e}");
+                    }
+                }
             },
             Err(e) => return Err(
                 ApiInitError::TlsConfig(e)
@@ -111,49 +118,46 @@ impl Deimos {
         Ok(())
     }
 
-    fn state_to_api(state: &ManagedContainerState) -> ContainerDockerStatus {
-        ContainerDockerStatus {
-            run_status: ContainerDockerRunStatus::from(state.running).into(),
-        }
+    pub async fn container_api_run_status(c: &ManagedContainer) -> deimosproto::ContainerUpState {
+        c.state.lock().await.as_ref().map(|s| proto::ContainerUpState::from(s.running)).unwrap_or(proto::ContainerUpState::Dead)
     }
 }
 
-impl From<ManagedContainerRunning> for ContainerDockerRunStatus {
-    fn from(value: ManagedContainerRunning) -> ContainerDockerRunStatus {
+impl From<ManagedContainerRunning> for proto::ContainerUpState {
+    fn from(value: ManagedContainerRunning) -> proto::ContainerUpState {
         match value {
-            ManagedContainerRunning::Dead => ContainerDockerRunStatus::Dead,
-            ManagedContainerRunning::Paused => ContainerDockerRunStatus::Paused,
-            ManagedContainerRunning::Running => ContainerDockerRunStatus::Running,
+            ManagedContainerRunning::Dead => proto::ContainerUpState::Dead,
+            ManagedContainerRunning::Paused => proto::ContainerUpState::Paused,
+            ManagedContainerRunning::Running => proto::ContainerUpState::Running,
         }
     }
 }
 
 
 #[async_trait]
-impl DeimosService for Deimos {
-    async fn query_containers(self: Arc<Self>, _request: tonic::Request<QueryContainersRequest>) -> Result<tonic::Response<QueryContainersResponse>, tonic::Status> {
+impl proto::DeimosService for Deimos {
+    async fn query_containers(self: Arc<Self>, _request: tonic::Request<proto::QueryContainersRequest>) -> Result<tonic::Response<proto::QueryContainersResponse>, tonic::Status> {
         let mut containers = Vec::new();
         for c in self.docker.containers.iter() {
             let c = c.value();
             containers.push(
-                ContainerBrief {
+                proto::ContainerBrief {
                     id: c.config.id.to_string(),
                     title: c.config.name.to_string(),
-                    updated: c.last_modified.timestamp(),
-                    running: c.state.lock().await.as_ref().map(Self::state_to_api),
+                    up_state: Self::container_api_run_status(c).await as i32,
                 }
             )
         }
 
         Ok(
-            tonic::Response::new(QueryContainersResponse { containers, })
+            tonic::Response::new(proto::QueryContainersResponse { containers, })
         )
     }
 
-    async fn get_container_image(self: Arc<Self>, _req: tonic::Request<ContainerImagesRequest>) -> Result<tonic::Response<ContainerImagesResponse>, tonic::Status> {
+    async fn get_container_image(self: Arc<Self>, _req: tonic::Request<proto::ContainerImagesRequest>) -> Result<tonic::Response<proto::ContainerImagesResponse>, tonic::Status> {
         Ok(
             tonic::Response::new(
-                ContainerImagesResponse {
+                proto::ContainerImagesResponse {
                     banner: None,
                     icon: None
                 }
@@ -161,28 +165,9 @@ impl DeimosService for Deimos {
         )
     }
 
-    async fn container_status(self: Arc<Self>, req: tonic::Request<ContainerStatusRequest>) -> Result<tonic::Response<ContainerStatusResponse>, tonic::Status> {
-        let req = req.into_inner();
-        match self.docker.containers.get(&req.container_id) {
-            Some(container) => {
-                let state = container.state.lock().await;
-                Ok(
-                    tonic::Response::new(
-                        ContainerStatusResponse {
-                            status: state.as_ref().map(Self::state_to_api),
-                        }
-                    )
-                )
-            },
-            None => Err(
-                tonic::Status::not_found(format!("No such container '{}'", req.container_id))
-            )
-        }
-    }
-
     type ContainerStatusStreamStream = ContainerStatusStreamer;
 
-    async fn container_status_stream(self: Arc<Self>, _: tonic::Request<ContainerStatusStreamRequest>) -> Result<tonic::Response<ContainerStatusStreamer>, tonic::Status> {
+    async fn container_status_stream(self: Arc<Self>, _: tonic::Request<proto::ContainerStatusStreamRequest>) -> Result<tonic::Response<ContainerStatusStreamer>, tonic::Status> {
         let rx = self.api.sender.subscribe();
 
         Ok(
@@ -192,25 +177,29 @@ impl DeimosService for Deimos {
         )
     }
 
-    async fn update_container(self: Arc<Self>, req: tonic::Request<UpdateContainerRequest>) -> Result<tonic::Response<UpdateContainerResponse>, tonic::Status> {
+    async fn update_container(self: Arc<Self>, req: tonic::Request<proto::UpdateContainerRequest>) -> Result<tonic::Response<proto::UpdateContainerResponse>, tonic::Status> {
         let req = req.into_inner();
-        let Ok(method) = UpdateContainerMethod::try_from(req.method) else { return Err(tonic::Status::invalid_argument("Request method")) };
+        let Ok(method) = proto::ContainerUpState::try_from(req.method) else { return Err(tonic::Status::invalid_argument("Request method")) };
         match self.docker.containers.get(&req.id).map(|v| v.value().clone()) {
             Some(c) => match method {
-                UpdateContainerMethod::Start => {
+                m if m == Self::container_api_run_status(&c).await => {
+                    Ok(tonic::Response::new(proto::UpdateContainerResponse {}))
+                },
+                proto::ContainerUpState::Running => {
                     if let Err(e) = self.start(c.clone()).await {
                         tracing::error!("Failed to start container '{}' in response to gRPC request: {}", c.container_name(), e);
                         return Err(tonic::Status::internal("failed"))
                     }
-                    Ok(tonic::Response::new(UpdateContainerResponse {}))
+                    Ok(tonic::Response::new(proto::UpdateContainerResponse {}))
                 },
-                UpdateContainerMethod::Stop => {
+                proto::ContainerUpState::Dead => {
                     if let Err(e) = self.destroy(c.clone()).await {
                         tracing::error!("Failed to destroy container '{}' in response to gRPC request: {}", c.container_name(), e);
                         return Err(tonic::Status::internal("failed"))
                     }
-                    Ok(tonic::Response::new(UpdateContainerResponse {} ))
-                }
+                    Ok(tonic::Response::new(proto::UpdateContainerResponse {} ))
+                },
+                _ => Ok(tonic::Response::new(proto::UpdateContainerResponse {})),
             },
             None => Err(
                 tonic::Status::not_found(format!("No such container: {}", req.id))
@@ -220,7 +209,7 @@ impl DeimosService for Deimos {
 }
 
 impl Stream for ContainerStatusStreamer {
-    type Item = Result<ContainerStatusNotification, tonic::Status>;
+    type Item = Result<proto::ContainerStatusNotification, tonic::Status>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
         match self.state.as_mut().poll(cx) {
@@ -234,7 +223,7 @@ impl Stream for ContainerStatusStreamer {
 }
 
 impl ContainerStatusStreamer {
-    pub fn new(channel: broadcast::Receiver<ContainerStatusNotification>) -> Self {
+    pub fn new(channel: broadcast::Receiver<proto::ContainerStatusNotification>) -> Self {
         let channel = Arc::new(Mutex::new(channel));
         let state = Self::future(channel.clone());
 
@@ -244,7 +233,7 @@ impl ContainerStatusStreamer {
         }
     }
 
-    fn future(channel: Arc<Mutex<broadcast::Receiver<ContainerStatusNotification>>>) -> BoxFuture<'static, Option<ContainerStatusNotification>> {
+    fn future(channel: Arc<Mutex<broadcast::Receiver<proto::ContainerStatusNotification>>>) -> BoxFuture<'static, Option<proto::ContainerStatusNotification>> {
         Box::pin(async move {
             channel
                 .lock()

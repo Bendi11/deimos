@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use iced::{alignment::{Horizontal, Vertical}, border::Radius, widget::svg, Background, Length, Padding, Shadow, Task, Vector};
 
-use crate::context::{container::CachedContainer, ContainerRef, Context};
+use crate::context::{container::{CachedContainer, CachedContainerUpState}, ContainerRef, Context};
 
 use super::{style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text}, DeimosMessage};
 
@@ -15,8 +15,7 @@ pub struct Sidebar {
 #[derive(Debug, Clone)]
 pub enum SidebarMessage {
     Refresh,
-    ContainerOn(ContainerRef),
-    ContainerOff(ContainerRef),
+    UpdateContainer(ContainerRef, CachedContainerUpState),
 }
 
 impl Sidebar {
@@ -116,9 +115,16 @@ impl Sidebar {
     }
 
     fn container_button(r: ContainerRef, container: &CachedContainer) -> Element<SidebarMessage> {
-        let (msg, text) = match container.data.running {
-            Some(_) => (SidebarMessage::ContainerOff(r), "Stop"),
-            None => (SidebarMessage::ContainerOn(r), "Start")
+        let (msg, text) = match container.data.up {
+            CachedContainerUpState::Dead => (SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running), "Start"),
+            CachedContainerUpState::Paused => (
+                SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running),
+                "Unpause"
+            ),
+            CachedContainerUpState::Running => (
+                SidebarMessage::UpdateContainer(r, CachedContainerUpState::Dead),
+                "Stop"
+            )
         };
 
         let row = Row::new()

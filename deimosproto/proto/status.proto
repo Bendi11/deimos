@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package deimos;
+
+import "container.proto";
+
+message ContainerStatusStreamRequest {}
+
+message ContainerStatusNotification {
+    string container_id = 1;
+    ContainerUpState up_state = 2;
+}

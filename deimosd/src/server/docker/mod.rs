@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use bollard::{container::{RemoveContainerOptions, StartContainerOptions}, secret::EventMessage, system::EventsOptions};
+use bollard::{container::{RemoveContainerOptions, StartContainerOptions, StopContainerOptions, WaitContainerOptions}, secret::EventMessage, system::EventsOptions};
 use container::{ManagedContainer, ManagedContainerError, ManagedContainerRunning, ManagedContainerState};
 use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
@@ -91,9 +91,13 @@ impl Deimos {
     /// Handle an event received from Docker, updating the state of the given container if required
     /// and sending status notifications to the gRPC server
     async fn handle_container_event(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) {
-        let updated = self.container_event_internal(id.clone(), managed.clone(), event).await;
+        let updated = self.clone().container_event_internal(id.clone(), managed.clone(), event).await;
         if updated {
             tracing::trace!("Notifying gRPC subscribers of status change for {}", id);
+            let up_state = Self::container_api_run_status(&managed).await as i32;
+            if let Err(e) = self.api.sender.send(deimosproto::ContainerStatusNotification { container_id: managed.container_name().to_string(), up_state }) {
+                tracing::error!("Failed to send status notification to channel: {e}");
+            }
         }
     }
     
@@ -108,7 +112,7 @@ impl Deimos {
         };
 
 
-        tracing::info!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
+        tracing::trace!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
 
         match action.as_str() {
             "oom" => {
@@ -120,13 +124,16 @@ impl Deimos {
                 }
                 true
             },
-            "kill" | "die" => {
-                state.running = ManagedContainerRunning::Dead;
-                drop(lock);
-                if let Err(e) = self.destroy(managed.clone()).await {
-                    tracing::error!("Failed to destroy container {}: {}", id, e);
-                }
+            "destroy" => {
+                *lock = None;
                 true
+            },
+            "die" => {
+                *lock = None;
+                true
+            },
+            "kill" => {
+                false
             },
             "paused" => {
                 state.running = ManagedContainerRunning::Paused;
@@ -151,8 +158,12 @@ impl Deimos {
     /// Stop and remove the Docker container for the given managed container, and remove event
     /// listeners for the container
     pub async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
-        let Some(state) = managed.state.lock().await.take() else { return Ok(()) };
-        self.docker.docker.stop_container(&state.docker_id, None).await?;
+        let mut lock = managed.state.lock().await;
+        let Some(ref mut state) = *lock else { return Ok(()) };
+        tracing::trace!("Waiting on container '{}' to stop", state.docker_id);
+        self.docker.docker.stop_container(&state.docker_id, Some(StopContainerOptions { t: 60 * 3 })).await?;
+        tracing::trace!("Container '{}' stopped", state.docker_id);
+
         self.docker.docker.remove_container(
             &state.docker_id,
             Some(RemoveContainerOptions {
@@ -162,8 +173,13 @@ impl Deimos {
         ).await?;
 
         tracing::info!("Stopped and removed container {} for {}", state.docker_id, managed.container_name());
+        
+        let handle = state.listener.abort_handle();
+        drop(lock);
 
-        state.listener.abort();
+        tokio::task::yield_now().await;
+
+        handle.abort();
 
         tracing::trace!("Aborted event listener for {}", managed.container_name());
 
@@ -196,16 +212,13 @@ impl Deimos {
     pub async fn docker_task(self: Arc<Self>, cancel: CancellationToken) {
         tokio::select! {
             _ = cancel.cancelled() => {},
-            _ = self.clone().run_internal() => {},
         };
         
         tracing::info!("Removing all Docker containers");
         self.stop_all().await;
+        tracing::trace!("Removed all Docker containers");
     }
 
-    async fn run_internal(self: Arc<Self>) {
-        
-    }
 
     /// Attempt to stop all running containers, e.g. for graceful server shutdown
     pub async fn stop_all(self: Arc<Self>) {

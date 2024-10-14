@@ -51,6 +51,7 @@ impl Deimos {
         
         let cancel_copy = cancel.clone();
         let this = self.clone();
+        let docker = tokio::task::spawn(self.clone().docker_task(cancel.clone()));
         let api_server = tokio::task::spawn(async move {
             if let Err(e) = this.serve_api(cancel_copy).await {
                 tracing::error!("Failed to serve gRPC API: {e}");
@@ -88,6 +89,7 @@ impl Deimos {
         }
 
         let _ = tokio::join! {
+            docker,
             api_server
         };
 

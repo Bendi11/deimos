@@ -6,7 +6,7 @@ edition = "2021"
 license = "none"
 
 [dependencies]
-deimos-shared = { path = "../deimos-shared", features = ["server"] }
+deimosproto = { path = "../deimosproto", features = ["server"] }
 tonic = { workspace = true, features = ["server"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "macros", "signal"] }
 tokio-util = "0.7"

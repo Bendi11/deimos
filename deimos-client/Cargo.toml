@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-deimos-shared = { path = "../deimos-shared", features = ["channel"] }
+deimosproto = { path = "../deimosproto", features = ["channel"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
 
 tonic = { workspace = true, features = ["channel"] }

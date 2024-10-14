@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package deimos;
+
+enum ContainerUpState {
+    DEAD = 0;
+    PAUSED = 1;
+    RUNNING = 2;
+}
+
+// Brief description of a container to inform clients of the existence and/or updates to managed containers
+message ContainerBrief {
+    // ID of the container used to identify it in calls
+    string id = 1;
+    // User-facing title to present in UI
+    string title = 2;
+    // Up status of the container
+    ContainerUpState up_state = 3;
+}

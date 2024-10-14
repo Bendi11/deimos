@@ -132,10 +132,12 @@ impl ManagedContainer {
                     .env
                     .iter()
                     .map(
-                        |var| format!("{}=\"{}\"", var.key, var.value)
+                        |var| format!("{}={}", var.key, var.value)
                     )
                     .collect()
             );
+
+        tracing::trace!("Env is {:#?}", env);
 
         let binds = (!self.config.docker.volume.is_empty())
             .then(||
@@ -179,7 +181,7 @@ impl ManagedContainer {
 
     /// Get the name of the Docker container when run
     pub fn container_name(&self) -> &str {
-        &self.config.name
+        &self.config.id
     }
 }
 

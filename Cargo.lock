@@ -983,7 +983,7 @@ name = "deimos-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "deimos-shared",
+ "deimosproto",
  "dirs 5.0.1",
  "http 1.1.0",
  "http-serde",
@@ -1001,18 +1001,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deimos-shared"
-version = "0.1.0"
-dependencies = [
- "prost",
- "thiserror",
- "tokio",
- "tonic",
- "tonic-build",
- "tracing",
-]
-
-[[package]]
 name = "deimosd"
 version = "0.1.0"
 dependencies = [
@@ -1020,7 +1008,7 @@ dependencies = [
  "bollard",
  "chrono",
  "dashmap",
- "deimos-shared",
+ "deimosproto",
  "futures",
  "igd-next",
  "local-ip-address",
@@ -1034,6 +1022,18 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zeroize",
+]
+
+[[package]]
+name = "deimosproto"
+version = "0.1.0"
+dependencies = [
+ "prost",
+ "thiserror",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "tracing",
 ]
 
 [[package]]
