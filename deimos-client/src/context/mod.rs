@@ -48,13 +48,15 @@ pub struct ContextState {
 
 #[derive(Clone, Debug)]
 pub enum ContextMessage {
+    /// Loaded all container data from the local cache
     Loaded(Vec<CachedContainer>),
-    Connected(DeimosServiceClient<Channel>),
+    /// gRPC client must be initialized in async context
+    ClientInit(Box<DeimosServiceClient<Channel>>),
     /// Received a listing of containers from the server, so update our local cache to match.
     /// Also remove any containers if their IDs are not contained in the given response
     BeginSynchronizeFromQuery(deimosproto::QueryContainersResponse),
     /// Received all container data including images, so update our in memory data
-    SynchronizeContainer(CachedContainer),
+    SynchronizeContainer(Box<CachedContainer>),
     /// Notification received from the server
     Notification(deimosproto::ContainerStatusNotification),
     /// An error occured in a future
@@ -143,7 +145,7 @@ impl Context {
         ).chain(
             iced::Task::perform(
                 Self::connect_api(self.state.settings.clone()),
-                ContextMessage::Connected
+                ContextMessage::ClientInit
             )
         )
     }
@@ -171,8 +173,8 @@ impl Context {
                 }
                 iced::Task::none()
             },
-            ContextMessage::Connected(api) => {
-                let api = Arc::new(Mutex::new(api));
+            ContextMessage::ClientInit(api) => {
+                let api = Arc::new(Mutex::new(*api));
                 self.api = Some(api.clone());
                 Self::container_notification_task(api)
             },
@@ -180,10 +182,10 @@ impl Context {
             ContextMessage::SynchronizeContainer(container) => {
                 match self.get_container_ref(&container.data.id) {
                     Some(exist) => {
-                        self.containers[exist] = container;
+                        self.containers[exist] = *container;
                     },
                     None => {
-                        self.containers.insert(container);
+                        self.containers.insert(*container);
                     }
                 }
 
@@ -193,7 +195,7 @@ impl Context {
                 Some(container) => {
                     tracing::trace!("Got status notification for {}", notify.container_id);
                     container.data.up = match deimosproto::ContainerUpState::try_from(notify.up_state).map(CachedContainerUpState::from) {
-                        Ok(up) => up,
+                        Ok(up) => up.into(),
                         Err(_) => {
                             tracing::error!("Unknown up status {} received for container '{}'", notify.up_state, notify.container_id);
                             return iced::Task::none()
@@ -276,7 +278,7 @@ impl Context {
                 let data = CachedContainerData {
                     id: new.id,
                     name: new.title,
-                    up,
+                    up: up.into(),
                 };
 
                 match self.get_container_mut(&data.id) {
@@ -306,19 +308,19 @@ impl Context {
         let settings = self.state.settings.clone();
         iced::Task::future(async move {
             let mut api = api.lock().await;
-            *api = Self::connect_api(settings).await;
+            *api = *Self::connect_api(settings).await;
         }).discard()
     }
     
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
-    async fn connect_api(settings: ContextSettings) -> DeimosServiceClient<Channel> {
+    async fn connect_api(settings: ContextSettings) -> Box<DeimosServiceClient<Channel>> {
         let channel = Channel::builder(settings.server_uri.clone())
             .connect_timeout(settings.connect_timeout)
             .timeout(settings.request_timeout)
             .connect_lazy();
 
-        DeimosServiceClient::new(channel)
+        Box::new(DeimosServiceClient::new(channel))
     }
 }
 

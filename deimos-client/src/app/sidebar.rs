@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use iced::{alignment::{Horizontal, Vertical}, border::Radius, widget::svg, Background, Length, Padding, Shadow, Task, Vector};
 
-use crate::context::{container::{CachedContainer, CachedContainerUpState}, ContainerRef, Context};
+use crate::context::{container::{CachedContainer, CachedContainerUpState, CachedContainerUpStateFull}, ContainerRef, Context};
 
 use super::{style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text}, DeimosMessage};
 
@@ -117,14 +117,23 @@ impl Sidebar {
 
     fn container_button(r: ContainerRef, container: &CachedContainer) -> Element<SidebarMessage> {
         let (msg, text) = match container.data.up {
-            CachedContainerUpState::Dead => (SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running), "Start"),
-            CachedContainerUpState::Paused => (
-                SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running),
-                "Unpause"
-            ),
-            CachedContainerUpState::Running => (
-                SidebarMessage::UpdateContainer(r, CachedContainerUpState::Dead),
-                "Stop"
+            CachedContainerUpStateFull::Known(ref state) => match state {
+            CachedContainerUpState::Dead => (
+                    Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
+                    "Start"
+                ),
+                CachedContainerUpState::Paused => (
+                    Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
+                    "Unpause"
+                ),
+                CachedContainerUpState::Running => (
+                    Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Dead)),
+                    "Stop"
+                )
+            },
+            CachedContainerUpStateFull::UpdateRequested { .. } => (
+                None,
+                "..."
             )
         };
 
@@ -141,7 +150,7 @@ impl Sidebar {
                     Button::new(
                         Text::new(text)
                     )
-                    .on_press(msg)
+                    .on_press_maybe(msg)
                     .height(Length::Fill)
                     .width(Length::FillPortion(1))
                     .class(

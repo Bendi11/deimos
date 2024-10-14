@@ -25,14 +25,23 @@ pub struct CachedContainer {
 pub struct CachedContainerData {
     pub id: String,
     pub name: String,
-    pub up: CachedContainerUpState,
+    pub up: CachedContainerUpStateFull,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CachedContainerUpState {
     Dead,
     Paused,
-    Running
+    Running,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum CachedContainerUpStateFull {
+    Known(CachedContainerUpState),
+    UpdateRequested {
+        old: CachedContainerUpState,
+        req: CachedContainerUpState,
+    }
 }
 
 impl Context {
@@ -220,6 +229,12 @@ impl From<CachedContainerUpState> for deimosproto::ContainerUpState {
             CachedContainerUpState::Paused => deimosproto::ContainerUpState::Paused,
             CachedContainerUpState::Running => deimosproto::ContainerUpState::Running
         }
+    }
+}
+
+impl From<CachedContainerUpState> for CachedContainerUpStateFull {
+    fn from(value: CachedContainerUpState) -> Self {
+        Self::Known(value)
     }
 }
 
