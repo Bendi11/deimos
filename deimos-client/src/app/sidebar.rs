@@ -15,6 +15,7 @@ pub struct Sidebar {
 #[derive(Debug, Clone)]
 pub enum SidebarMessage {
     Refresh,
+    SelectContainer(ContainerRef),
     UpdateContainer(ContainerRef, CachedContainerUpState),
 }
 
@@ -132,6 +133,8 @@ impl Sidebar {
                 Button::new(
                     Text::new(&container.data.name)
                 )
+                .on_press(SidebarMessage::SelectContainer(r))
+                .height(Length::Fill)
                 .width(Length::FillPortion(3))
             )
             .push(

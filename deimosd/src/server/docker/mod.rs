@@ -171,7 +171,7 @@ impl Deimos {
         self.docker.docker.remove_container(
             &id,
             Some(RemoveContainerOptions {
-                force: false,
+                force: true,
                 ..Default::default()
             })
         ).await?;
