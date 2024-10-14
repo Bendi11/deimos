@@ -24,6 +24,8 @@ mime = { workspace = true }
 
 slotmap = { version = "1.0", features = ["serde"] }
 
+iced_anim = "0.1"
+
 [dependencies.iced]
 version = "0.13"
 features = ["tokio", "image", "svg", "debug"]

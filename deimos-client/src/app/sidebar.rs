@@ -138,27 +138,25 @@ impl Sidebar {
                 .width(Length::FillPortion(3))
             )
             .push(
-                Container::new(
                     Button::new(
                         Text::new(text)
                     )
                     .on_press(msg)
                     .height(Length::Fill)
                     .width(Length::FillPortion(1))
-                )
-                .class(
-                    ContainerClass {
-                        background: None,
-                        radius: Radius::new(0f32),
-                        shadow: Some(
-                            Shadow {
-                                color: orbit::NIGHT[2],
-                                offset: Vector::new(-0.5f32, 0f32),
-                                blur_radius: 3f32
-                            }
-                        )
-                    }
-                )
+                    .class(
+                        ContainerClass {
+                            background: None,
+                            radius: Radius::new(0f32),
+                            shadow: Some(
+                                Shadow {
+                                    color: orbit::NIGHT[2],
+                                    offset: Vector::new(-0.5f32, 0f32),
+                                    blur_radius: 3f32
+                                }
+                            )
+                        }
+                    )
             );
 
         Container::new(row)

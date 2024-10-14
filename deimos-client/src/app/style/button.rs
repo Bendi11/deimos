@@ -6,13 +6,14 @@ use super::{container::ContainerClass, Theme};
 pub struct ButtonClass {
     pub normal: ContainerClass,
     pub hovered: ContainerClass,
+    pub pressed: ContainerClass,
 }
 
 impl button::Catalog for Theme {
     type Class<'a> = ButtonClass;
 
     fn default<'a>() -> Self::Class<'a> {
-        ButtonClass::default()
+        ButtonClass::from(ContainerClass::default())
     }
 
     fn style(&self, class: &Self::Class<'_>, status: button::Status) -> button::Style {
@@ -24,6 +25,7 @@ impl ButtonClass {
     fn style(&self, status: button::Status) -> button::Style {
         match status {
             button::Status::Hovered => Self::container_to_button(&self.hovered),
+            button::Status::Pressed => Self::container_to_button(&self.pressed),
             _ => Self::container_to_button(&self.normal),
         }
     }
@@ -38,6 +40,59 @@ impl ButtonClass {
             background: class.background,
             shadow: class.shadow.unwrap_or_default(),
             ..Default::default()
+        }
+    }
+
+    fn scale_color(color: iced::Color, modify: iced::Color) -> iced::Color {
+        iced::Color::from_rgba(color.r * modify.r, color.g * modify.g, color.b * modify.b, color.a * modify.a)
+    }
+
+    fn modify_background(bg: iced::Background, modify: iced::Color) -> iced::Background {
+        match bg {
+            Background::Color(c) => Background::Color(Self::scale_color(c, modify)),
+            Background::Gradient(gradient) => match gradient {
+                iced::Gradient::Linear(linear) => Background::Gradient(iced::Gradient::Linear(
+                    iced::gradient::Linear {
+                        angle: linear.angle,
+                        stops: linear.stops.map(|s|
+                            s.map(|stop| 
+                                iced::gradient::ColorStop {
+                                    offset: stop.offset,
+                                    color: Self::scale_color(stop.color, modify),
+                                }
+                            )
+                        )
+                    }
+                ))
+            }
+        }
+    }
+}
+
+impl From<ContainerClass> for ButtonClass {
+    fn from(value: ContainerClass) -> Self {
+        Self {
+            normal: value,
+            hovered: ContainerClass {
+                radius: value.radius,
+                background: Some(
+                    value
+                        .background
+                        .map(|c| Self::modify_background(c, iced::Color::from_rgb(0.85, 0.85, 0.85)))
+                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.15)))
+                ),
+                shadow: value.shadow,
+            },
+            pressed: ContainerClass {
+                radius: value.radius,
+                background: Some(
+                    value
+                        .background
+                        .map(|c| Self::modify_background(c, iced::Color::from_rgb(0.75, 0.75, 0.75)))
+                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.25)))
+                ),
+                shadow: value.shadow,
+            }
         }
     }
 }

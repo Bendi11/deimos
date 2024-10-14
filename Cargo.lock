@@ -989,6 +989,7 @@ dependencies = [
  "http 1.1.0",
  "http-serde",
  "iced",
+ "iced_anim",
  "iced_aw",
  "mime",
  "serde",
@@ -2017,6 +2018,15 @@ dependencies = [
  "iced_winit",
  "image",
  "thiserror",
+]
+
+[[package]]
+name = "iced_anim"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2de48d8d1bf1f0806217714554c00a71d4511794d1923bd0ac8ff1dafda90fcb"
+dependencies = [
+ "iced",
 ]
 
 [[package]]
