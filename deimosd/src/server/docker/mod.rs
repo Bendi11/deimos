@@ -162,11 +162,9 @@ impl Deimos {
 
         let handle = state.listener.abort_handle();
         let id = state.docker_id.clone();
-        drop(lock);
 
         tracing::trace!("Waiting on container '{}' to stop", id);
         self.docker.docker.stop_container(&id, Some(StopContainerOptions { t: 60 * 3 })).await?;
-        tracing::trace!("Container '{}' stopped", id);
 
         self.docker.docker.remove_container(
             &id,
@@ -177,10 +175,10 @@ impl Deimos {
         ).await?;
 
         tracing::info!("Stopped and removed container {} for {}", id, managed.container_name());
-
-        tokio::task::yield_now().await;
-
+         
         handle.abort();
+        *lock = None;
+        let _ = self.api.sender.send(deimosproto::ContainerStatusNotification { container_id: managed.container_name().to_string(), up_state: deimosproto::ContainerUpState::Dead as i32 });
 
         tracing::trace!("Aborted event listener for {}", managed.container_name());
 

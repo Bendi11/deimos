@@ -124,20 +124,24 @@ impl Sidebar {
             CachedContainerUpStateFull::Known(ref state) => match state {
             CachedContainerUpState::Dead => (
                     Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
-                    self.start.clone()
+                    Svg::new(self.start.clone())
+                        .class(orbit::MERCURY[2])
                 ),
                 CachedContainerUpState::Paused => (
                     Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
-                    self.start.clone()
+                    Svg::new(self.start.clone())
+                        .class(orbit::MERCURY[2])
                 ),
                 CachedContainerUpState::Running => (
                     Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Dead)),
-                    self.stop.clone()
+                    Svg::new(self.stop.clone())
+                        .class(orbit::MARS[1])
                 )
             },
             CachedContainerUpStateFull::UpdateRequested { .. } => (
                 None,
-                self.reload.clone()
+                Svg::new(self.reload.clone())
+                    .class(orbit::EARTH[2])
             )
         };
 
@@ -152,8 +156,7 @@ impl Sidebar {
             )
             .push(
                     Button::new(
-                        Svg::new(svg)
-                            .class(orbit::MERCURY[2])
+                        svg
                             .width(Length::Fill)
                             .height(Length::Fill)
                     )
@@ -176,7 +179,7 @@ impl Sidebar {
             );
 
         Container::new(row)
-            .height(64f32)
+            .height(60f32)
             .width(Length::Fill)
             .class(
                 ContainerClass {

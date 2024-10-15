@@ -44,7 +44,7 @@ impl ButtonClass {
     }
 
     fn scale_color(color: iced::Color, modify: iced::Color) -> iced::Color {
-        iced::Color::from_rgba(color.r * modify.r, color.g * modify.g, color.b * modify.b, color.a * modify.a)
+        iced::Color::from_rgba(color.r - color.r * modify.r, color.g - color.g * modify.g, color.b - color.b * modify.b, color.a - color.a * modify.a)
     }
 
     fn modify_background(bg: iced::Background, modify: iced::Color) -> iced::Background {
