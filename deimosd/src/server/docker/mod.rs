@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
-use bollard::{container::{RemoveContainerOptions, StartContainerOptions, StopContainerOptions, WaitContainerOptions}, secret::EventMessage, system::EventsOptions};
+use bollard::{container::{RemoveContainerOptions, StartContainerOptions, StopContainerOptions}, secret::EventMessage, system::EventsOptions};
 use container::{ManagedContainer, ManagedContainerError, ManagedContainerRunning, ManagedContainerState};
 use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
@@ -13,8 +13,34 @@ pub mod state;
 pub use state::{DockerState, DockerInitError};
 
 impl Deimos {
+    /// Create a Docker container if it does not exist and start the given managed container
+    pub async fn start(self: Arc<Self>, managed: Arc<ManagedContainer>, state: &mut Option<ManagedContainerState>) -> Result<Arc<str>, ManagedContainerError> {
+        let docker_id = match state {
+            Some(ref mut state) => match state.running {
+                ManagedContainerRunning::Dead | ManagedContainerRunning::Paused => state.docker_id.clone(),
+                ManagedContainerRunning::Running => {
+                    return Ok(state.docker_id.clone())
+                }
+            },
+            None => self.clone().create_container(managed.clone(), state).await?,
+        };
+
+        self
+            .docker
+            .docker
+            .start_container(&docker_id, Option::<StartContainerOptions<String>>::None).await?;
+
+        tracing::trace!("Starting container {} for '{}'", docker_id, managed.container_name());
+
+        Ok(docker_id)
+    }
+
     /// Create a container from the configuration loaded for the given managed container
-    pub async fn create_container(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<Arc<str>, ManagedContainerError> {
+    pub async fn create_container(self: Arc<Self>, managed: Arc<ManagedContainer>, state: &mut Option<ManagedContainerState>) -> Result<Arc<str>, ManagedContainerError> {
+        if let Some(ref state) = state {
+            return Ok(state.docker_id.clone())
+        }
+
         let config = managed.docker_config();
 
         let response = self.docker.docker
@@ -57,7 +83,6 @@ impl Deimos {
 
         tracing::trace!("Subscribed to events for container '{}': {}", managed.container_name(), docker_id);
 
-        let mut state = managed.state.lock().await;
         *state = Some(
             ManagedContainerState {
                 docker_id: docker_id.clone(),
@@ -88,40 +113,23 @@ impl Deimos {
         })
     }
     
-    /// Handle an event received from Docker, updating the state of the given container if required
-    /// and sending status notifications to the gRPC server
-    async fn handle_container_event(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) {
-        let updated = self.clone().container_event_internal(id.clone(), managed.clone(), event).await;
-        if updated {
-            tracing::trace!("Notifying gRPC subscribers of status change for {}", id);
-            let up_state = Self::container_api_run_status(&managed).await as i32;
-            if let Err(e) = self.api.sender.send(deimosproto::ContainerStatusNotification { container_id: managed.container_name().to_string(), up_state }) {
-                tracing::error!("Failed to send status notification to channel: {e}");
-            }
-        }
-    }
-    
     /// Modify the state of the managed container if necessary, and return `true` if we should send
     /// a notification of state change
-    async fn container_event_internal(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) -> bool {
-        let Some(action) = event.action else { return false };
+    async fn handle_container_event(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) {
+        let Some(action) = event.action else { return };
         let mut lock = managed.state.lock().await;
         let Some(ref mut state) = *lock else {
-            tracing::warn!("Received event for deleted container {}", managed.container_name());
-            return false
+            tracing::trace!("Received event for deleted container {}", managed.container_name());
+            return
         };
 
 
         tracing::trace!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
 
-        match action.as_str() {
+        let updated = match action.as_str() {
             "oom" => {
                 tracing::error!("Container {} out of memory received - destroying container", state.docker_id);
                 state.running = ManagedContainerRunning::Dead;
-                drop(lock);
-                if let Err(e) = self.destroy(managed.clone()).await {
-                    tracing::error!("Failed to destroy container {}: {}", id, e);
-                }
                 true
             },
             "destroy" => {
@@ -151,14 +159,17 @@ impl Deimos {
                 true
             }
             _ => false
+        };
+
+        if updated {
+            self.notify_status(managed.container_name(), &lock).await;
         }
     }
     
     /// Stop and remove the Docker container for the given managed container, and remove event
     /// listeners for the container
-    pub async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
-        let mut lock = managed.state.lock().await;
-        let Some(ref mut state) = *lock else { return Ok(()) };
+    pub async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>, lock: &mut Option<ManagedContainerState>) -> Result<(), ManagedContainerError> {
+        let Some(ref mut state) = lock else { return Ok(()) };
 
         let handle = state.listener.abort_handle();
         let id = state.docker_id.clone();
@@ -178,30 +189,9 @@ impl Deimos {
          
         handle.abort();
         *lock = None;
-        let _ = self.api.sender.send(deimosproto::ContainerStatusNotification { container_id: managed.container_name().to_string(), up_state: deimosproto::ContainerUpState::Dead as i32 });
+        self.notify_status(managed.container_name(), lock).await;
 
         tracing::trace!("Aborted event listener for {}", managed.container_name());
-
-        Ok(())
-    }
-    
-    /// Create a Docker container for the given container if none exists, and start it
-    pub async fn start(self: Arc<Self>, managed: Arc<ManagedContainer>) -> Result<(), ManagedContainerError> {
-        let lock = managed.state.lock().await;
-        let docker_id = match *lock {
-            Some(ref state) => state.docker_id.clone(),
-            None => {
-                drop(lock);
-                self.clone().create_container(managed.clone()).await?
-            }
-        };
-
-        self
-            .docker
-            .docker
-            .start_container(&docker_id, Option::<StartContainerOptions<String>>::None).await?;
-
-        tracing::trace!("Starting container {} for '{}'", docker_id, managed.container_name());
 
         Ok(())
     }
@@ -225,7 +215,15 @@ impl Deimos {
         let tasks = containers
             .into_iter()
             .map(
-                |container| tokio::task::spawn(self.clone().destroy(container))
+                |container| {
+                    let this = self.clone();
+                    tokio::task::spawn(
+                        async move {
+                            let mut state = container.state.lock().await;
+                            this.destroy(container.clone(), &mut state).await
+                        }
+                    )
+                }
             );
 
         for future in tasks {

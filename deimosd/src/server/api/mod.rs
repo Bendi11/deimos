@@ -118,8 +118,17 @@ impl Deimos {
         Ok(())
     }
 
-    pub async fn container_api_run_status(c: &ManagedContainer) -> deimosproto::ContainerUpState {
-        c.state.lock().await.as_ref().map(|s| proto::ContainerUpState::from(s.running)).unwrap_or(proto::ContainerUpState::Dead)
+    /// Notify gRPC subscribers of the given managed container state
+    pub async fn notify_status(&self, container_id: &str, state: &Option<ManagedContainerState>) {
+        tracing::trace!("Notifying subscribers of status change for {}", container_id);
+        let up_state = Self::container_api_run_status(state);
+        if let Err(e) = self.api.sender.send(deimosproto::ContainerStatusNotification { container_id: container_id.to_owned(), up_state: up_state as i32 }) {
+            tracing::trace!("Failed to send container update notification to channel: {}", e);
+        }
+    }
+
+    fn container_api_run_status(state: &Option<ManagedContainerState>) -> deimosproto::ContainerUpState {
+        state.as_ref().map(|s| proto::ContainerUpState::from(s.running)).unwrap_or(proto::ContainerUpState::Dead)
     }
 }
 
@@ -144,7 +153,7 @@ impl proto::DeimosService for Deimos {
                 proto::ContainerBrief {
                     id: c.config.id.to_string(),
                     title: c.config.name.to_string(),
-                    up_state: Self::container_api_run_status(c).await as i32,
+                    up_state: Self::container_api_run_status(&*c.state.lock().await) as i32,
                 }
             )
         }
@@ -181,25 +190,36 @@ impl proto::DeimosService for Deimos {
         let req = req.into_inner();
         let Ok(method) = proto::ContainerUpState::try_from(req.method) else { return Err(tonic::Status::invalid_argument("Request method")) };
         match self.docker.containers.get(&req.id).map(|v| v.value().clone()) {
-            Some(c) => match method {
-                m if m == Self::container_api_run_status(&c).await => {
-                    Ok(tonic::Response::new(proto::UpdateContainerResponse {}))
-                },
-                proto::ContainerUpState::Running => {
-                    if let Err(e) = self.start(c.clone()).await {
-                        tracing::error!("Failed to start container '{}' in response to gRPC request: {}", c.container_name(), e);
-                        return Err(tonic::Status::internal("failed"))
+            Some(c) => {
+                match method {
+                    proto::ContainerUpState::Running => {
+                        tokio::task::spawn(
+                            async move {
+                                let mut state = c.state.lock().await;
+                                if let Err(e) = self.start(c.clone(), &mut state).await {
+                                    tracing::error!("Failed to start server in response to gRPC request: {e}");
+                                }
+                            }
+                        );
                     }
-                    Ok(tonic::Response::new(proto::UpdateContainerResponse {}))
-                },
-                proto::ContainerUpState::Dead => {
-                    if let Err(e) = self.destroy(c.clone()).await {
-                        tracing::error!("Failed to destroy container '{}' in response to gRPC request: {}", c.container_name(), e);
-                        return Err(tonic::Status::internal("failed"))
-                    }
-                    Ok(tonic::Response::new(proto::UpdateContainerResponse {} ))
-                },
-                _ => Ok(tonic::Response::new(proto::UpdateContainerResponse {})),
+                    proto::ContainerUpState::Dead => {
+                        tokio::task::spawn(
+                            async move {
+                                let mut state = c.state.lock().await;
+                                if let Err(e) = self.destroy(c.clone(), &mut state).await {
+                                    tracing::error!("Failed to destroy server in response to gRPC request: {e}");
+                                }
+                            }
+                        );
+                    },
+                    _ => ()
+                };
+
+                Ok(
+                    tonic::Response::new(
+                        proto::UpdateContainerResponse {}
+                    )
+                )
             },
             None => Err(
                 tonic::Status::not_found(format!("No such container: {}", req.id))

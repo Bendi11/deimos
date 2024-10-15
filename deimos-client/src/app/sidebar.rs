@@ -155,6 +155,7 @@ impl Sidebar {
                 .width(Length::FillPortion(3))
             )
             .push(
+                Container::new(
                     Button::new(
                         svg
                             .width(Length::Fill)
@@ -163,7 +164,7 @@ impl Sidebar {
                     .on_press_maybe(msg)
                     .height(Length::Fill)
                     .width(Length::FillPortion(1))
-                    .class(
+                ).class(
                         ContainerClass {
                             background: None,
                             radius: Radius::new(0f32),
@@ -191,7 +192,7 @@ impl Sidebar {
                         Shadow {
                             color: orbit::NIGHT[2],
                             offset: Vector::ZERO,
-                            blur_radius: 4f32
+                            blur_radius: 5f32
                         }
                     ),
                 }

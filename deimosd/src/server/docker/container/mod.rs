@@ -38,9 +38,22 @@ pub enum ManagedContainerRunning {
     Running
 }
 
+pub struct ManagedContainerStateGuard<'a> {
+    lock: tokio::sync::MappedMutexGuard<'a, ManagedContainerState>,
+}
 
 impl ManagedContainer {
     const CONFIG_FILENAME: &str = "container.toml";
+    
+    pub async fn state(&self) -> Option<tokio::sync::MappedMutexGuard<'_, ManagedContainerState>> {
+        tokio::sync::MutexGuard::try_map(
+            self
+                .state
+                .lock()
+                .await,
+            |lock| lock.as_mut()
+        ).ok()
+    }
 
     /// Load a new managed container from the given configuration file, ensuring that the image
     /// name given in the config exists in the local Docker engine

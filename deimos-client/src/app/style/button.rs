@@ -78,8 +78,8 @@ impl From<ContainerClass> for ButtonClass {
                 background: Some(
                     value
                         .background
-                        .map(|c| Self::modify_background(c, iced::Color::from_rgb(0.85, 0.85, 0.85)))
-                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.15)))
+                        .map(|c| Self::modify_background(c, iced::Color::from_rgb(0.8, 0.8, 0.8)))
+                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.2)))
                 ),
                 shadow: value.shadow,
             },
