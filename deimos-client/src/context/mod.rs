@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
-use container::{CachedContainer, CachedContainerData, CachedContainerUpState};
+use container::{CachedContainer, CachedContainerData, CachedContainerUpState, CachedContainerUpStateFull};
 use deimosproto::DeimosServiceClient;
 use http::Uri;
 use iced::futures::{Stream, StreamExt};
@@ -230,10 +230,23 @@ impl Context {
     }
     
     /// Change the given container's status on the server
-    pub fn update_container(&self, container: ContainerRef, run: CachedContainerUpState) -> iced::Task<ContextMessage> {
-        let Some(id) = self.containers.get(container).map(|c| c.data.id.clone()) else {
-            tracing::warn!("Got update container message for unknown container '{:?}'", container);
-            return iced::Task::none()
+    pub fn update_container(&mut self, container: ContainerRef, run: CachedContainerUpState) -> iced::Task<ContextMessage> {
+        let id = match self.containers.get_mut(container) {
+            Some(container) => {
+                container.data.up = CachedContainerUpStateFull::UpdateRequested {
+                    old: match container.data.up {
+                        CachedContainerUpStateFull::Known(s) => s,
+                        _ => CachedContainerUpState::Dead
+                    },
+                    req: run
+                };
+
+                container.data.id.clone()
+            },
+            None => {
+                tracing::warn!("Got update container message for unknown container '{:?}'", container);
+                return iced::Task::none()
+            }
         };
 
         let Some(api) = self.api.clone() else { return iced::Task::none() };

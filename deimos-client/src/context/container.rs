@@ -28,14 +28,14 @@ pub struct CachedContainerData {
     pub up: CachedContainerUpStateFull,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub enum CachedContainerUpState {
     Dead,
     Paused,
     Running,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub enum CachedContainerUpStateFull {
     Known(CachedContainerUpState),
     UpdateRequested {

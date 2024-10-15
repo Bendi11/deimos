@@ -10,6 +10,8 @@ use super::{style::{container::ContainerClass, orbit, Button, Column, Container,
 pub struct Sidebar {
     icon: svg::Handle,
     reload: svg::Handle,
+    start: svg::Handle,
+    stop: svg::Handle,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +26,8 @@ impl Sidebar {
         Self {
             icon: svg::Handle::from_memory(include_bytes!("../../assets/mars-deimos.svg")),
             reload: svg::Handle::from_memory(include_bytes!("../../assets/reload.svg")),
+            start: svg::Handle::from_memory(include_bytes!("../../assets/start.svg")),
+            stop: svg::Handle::from_memory(include_bytes!("../../assets/stop.svg")),
         }
     }
 
@@ -80,7 +84,7 @@ impl Sidebar {
             );
 
         for (r, container) in ctx.containers.iter() {
-            containers = containers.push(Self::container_button(r, container));
+            containers = containers.push(self.container_button(r, container));
         }
 
 
@@ -115,25 +119,25 @@ impl Sidebar {
         }
     }
 
-    fn container_button(r: ContainerRef, container: &CachedContainer) -> Element<SidebarMessage> {
-        let (msg, text) = match container.data.up {
+    fn container_button<'a>(&self, r: ContainerRef, container: &'a CachedContainer) -> Element<'a, SidebarMessage> {
+        let (msg, svg) = match container.data.up {
             CachedContainerUpStateFull::Known(ref state) => match state {
             CachedContainerUpState::Dead => (
                     Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
-                    "Start"
+                    self.start.clone()
                 ),
                 CachedContainerUpState::Paused => (
                     Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
-                    "Unpause"
+                    self.start.clone()
                 ),
                 CachedContainerUpState::Running => (
                     Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Dead)),
-                    "Stop"
+                    self.stop.clone()
                 )
             },
             CachedContainerUpStateFull::UpdateRequested { .. } => (
                 None,
-                "..."
+                self.reload.clone()
             )
         };
 
@@ -148,7 +152,10 @@ impl Sidebar {
             )
             .push(
                     Button::new(
-                        Text::new(text)
+                        Svg::new(svg)
+                            .class(orbit::MERCURY[2])
+                            .width(Length::Fill)
+                            .height(Length::Fill)
                     )
                     .on_press_maybe(msg)
                     .height(Length::Fill)
