@@ -10,8 +10,6 @@ use crate::server::docker::container::ManagedContainerShared;
 
 use super::container::{DeimosId, ManagedContainer};
 
-
-
 /// Service managing the creation and removal of Docker containers
 pub struct DockerState {
     pub config: DockerConfig,
@@ -46,7 +44,6 @@ pub enum DockerConnectionType {
     Local,
 }
 
-
 pub type StatusStream = Forked<futures::stream::SelectAll<ContainerStatusStreamer>>;
 
 impl DockerState {
@@ -77,10 +74,13 @@ impl DockerState {
         }?;
 
         let mut containers = HashMap::new();
-        
+
         let dir = config.containerdir.clone();
-        let container_entries = std::fs::read_dir(&dir)
-            .map_err(|err| DockerInitError::ContainersDirError { dir: dir.clone(), err })?;
+        let container_entries =
+            std::fs::read_dir(&dir).map_err(|err| DockerInitError::ContainersDirError {
+                dir: dir.clone(),
+                err,
+            })?;
 
         for entry in container_entries {
             let entry = match entry {
@@ -91,14 +91,14 @@ impl DockerState {
                         dir.display(),
                         e
                     );
-                    continue
+                    continue;
                 }
             };
 
             let container = match entry.file_type() {
                 Ok(fty) if fty.is_dir() => {
                     ManagedContainer::load_from_dir(entry.path(), &docker).await
-                },
+                }
                 Ok(_) => {
                     tracing::warn!(
                         "Unknown file in container config directory: {}",
@@ -149,7 +149,7 @@ impl DockerState {
             config,
             docker,
             containers,
-            status_stream
+            status_stream,
         })
     }
 
@@ -159,23 +159,19 @@ impl DockerState {
     }
 }
 
-
 #[derive(Debug, thiserror::Error)]
 pub enum DockerInitError {
     #[error("Docker API error: {0}")]
     Bollard(#[from] bollard::errors::Error),
     #[error("Failed to load container configs from directory {dir}: {err}")]
-    ContainersDirError {
-        dir: PathBuf,
-        err: std::io::Error
-    },
+    ContainersDirError { dir: PathBuf, err: std::io::Error },
     #[error("Duplicate configurations detected for docker container with name {0}")]
     DuplicateConfiguration(DeimosId),
 }
 
 pub struct ContainerStatusStreamer {
     container: Arc<ManagedContainer>,
-    future: ReusableBoxFuture<'static, watch::Receiver<Option<ManagedContainerShared>>>
+    future: ReusableBoxFuture<'static, watch::Receiver<Option<ManagedContainerShared>>>,
 }
 
 impl ContainerStatusStreamer {
@@ -186,7 +182,9 @@ impl ContainerStatusStreamer {
         }
     }
 
-    async fn make_future(mut recv: watch::Receiver<Option<ManagedContainerShared>>) -> watch::Receiver<Option<ManagedContainerShared>> {
+    async fn make_future(
+        mut recv: watch::Receiver<Option<ManagedContainerShared>>,
+    ) -> watch::Receiver<Option<ManagedContainerShared>> {
         let _ = recv.changed().await;
         recv
     }
@@ -195,7 +193,10 @@ impl ContainerStatusStreamer {
 impl Stream for ContainerStatusStreamer {
     type Item = Arc<ManagedContainer>;
 
-    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
         let rx = futures::ready!(self.future.poll(cx));
         self.future.set(Self::make_future(rx));
         std::task::Poll::Ready(Some(self.container.clone()))

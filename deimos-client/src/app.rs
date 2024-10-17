@@ -7,16 +7,14 @@ use iced::{
 };
 use settings::{Settings, SettingsMessage};
 use sidebar::{Sidebar, SidebarMessage};
-use style::{
-    orbit, Button, Column, Container, Element, Row, Theme,
-};
+use style::{orbit, Button, Column, Container, Element, Row, Theme};
 
 use crate::context::{Context, ContextMessage};
 
+mod cview;
 mod settings;
 mod sidebar;
 mod style;
-mod cview;
 
 #[derive(Debug)]
 pub struct DeimosApplication {
@@ -76,9 +74,8 @@ impl DeimosApplication {
             .theme(|_| Theme::default())
             .exit_on_close_request(false)
             .subscription(Self::subscription_window_event)
-            .run_with(move || {
-                (this, task.map(DeimosMessage::Context))
-            }) {
+            .run_with(move || (this, task.map(DeimosMessage::Context)))
+        {
             Ok(_) => ExitCode::SUCCESS,
             Err(e) => {
                 tracing::error!("Failed to run iced application: {e}");
@@ -92,7 +89,7 @@ impl DeimosApplication {
             DeimosMessage::Close => {
                 self.ctx.save();
                 iced::exit()
-            },
+            }
             DeimosMessage::Navigate(view) => {
                 let task = match self.view {
                     DeimosView::Settings => self.ctx.reload_settings().map(DeimosMessage::Context),
@@ -101,21 +98,39 @@ impl DeimosApplication {
 
                 self.view = view;
                 task
-            },
+            }
             DeimosMessage::Context(msg) => self.ctx.update(msg).map(DeimosMessage::Context),
-            DeimosMessage::Settings(msg) => self.settings.update(&mut self.ctx, msg).map(DeimosMessage::Settings),
+            DeimosMessage::Settings(msg) => self
+                .settings
+                .update(&mut self.ctx, msg)
+                .map(DeimosMessage::Settings),
             DeimosMessage::Sidebar(m) => match m {
-                SidebarMessage::Refresh => self.ctx.synchronize_from_server().map(DeimosMessage::Context),
-                SidebarMessage::UpdateContainer(container, state) => self.ctx.update_container(container, state).map(DeimosMessage::Context),
+                SidebarMessage::Refresh => self
+                    .ctx
+                    .synchronize_from_server()
+                    .map(DeimosMessage::Context),
+                SidebarMessage::UpdateContainer(container, state) => self
+                    .ctx
+                    .update_container(container, state)
+                    .map(DeimosMessage::Context),
                 SidebarMessage::SelectContainer(container) => {
-                    let task = self.container_view.update(&mut self.ctx, ContainerViewMessage::ChangeView(container))
+                    let task = self
+                        .container_view
+                        .update(&mut self.ctx, ContainerViewMessage::ChangeView(container))
                         .map(DeimosMessage::ContainerView);
-                    task
-                        .chain(iced::Task::done(DeimosMessage::Navigate(DeimosView::ContainerView)))
+                    task.chain(iced::Task::done(DeimosMessage::Navigate(
+                        DeimosView::ContainerView,
+                    )))
                 }
-                other => self.sidebar.update(&mut self.ctx, other).map(DeimosMessage::Sidebar),
+                other => self
+                    .sidebar
+                    .update(&mut self.ctx, other)
+                    .map(DeimosMessage::Sidebar),
             },
-            DeimosMessage::ContainerView(msg) => self.container_view.update(&mut self.ctx, msg).map(DeimosMessage::ContainerView),
+            DeimosMessage::ContainerView(msg) => self
+                .container_view
+                .update(&mut self.ctx, msg)
+                .map(DeimosMessage::ContainerView),
         }
     }
 
@@ -142,7 +157,10 @@ impl DeimosApplication {
             .push(self.sidebar.view(&self.ctx).map(DeimosMessage::Sidebar))
             .push(match self.view {
                 DeimosView::Settings => self.settings.view(&self.ctx).map(DeimosMessage::Settings),
-                DeimosView::ContainerView => self.container_view.view(&self.ctx).map(DeimosMessage::ContainerView),
+                DeimosView::ContainerView => self
+                    .container_view
+                    .view(&self.ctx)
+                    .map(DeimosMessage::ContainerView),
                 _ => self.empty_view(),
             })
             .into()

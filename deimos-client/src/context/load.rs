@@ -52,7 +52,7 @@ impl Context {
             }),
         }
     }
-    
+
     /// Write all context state to the save file located in the cache directory
     pub fn save_state(&self) {
         let state_path = self.cache_dir.join(Self::STATE_FILE_NAME);

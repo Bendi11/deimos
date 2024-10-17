@@ -1,5 +1,8 @@
 use std::{
-    io::Write, path::{Path, PathBuf}, str::FromStr, sync::Arc
+    io::Write,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
 };
 
 use chrono::{DateTime, Utc};
@@ -41,7 +44,7 @@ pub enum CachedContainerUpStateFull {
     UpdateRequested {
         old: CachedContainerUpState,
         req: CachedContainerUpState,
-    }
+    },
 }
 
 impl Context {
@@ -112,7 +115,6 @@ impl Context {
                         }
                     };
 
-                    
                     let full = CachedContainer::load(meta, &path).await;
                     containers.push(full)
                 }
@@ -143,18 +145,23 @@ impl CachedContainerData {
         })?;
         serde_json::from_str::<CachedContainerData>(&data_str).map_err(Into::into)
     }
-    
+
     /// Write cached container metadata to a local cache directory
     fn save(&self, directory: &Path) -> Result<(), CachedContainerSaveError> {
         let meta_path = directory.join(CachedContainer::METADATA_FILE);
 
-        let mut file = std::fs::File::create(&meta_path).map_err(|err| CachedContainerSaveError::IO {
-            path: meta_path.clone(),
-            err,
-        })?;
-        
+        let mut file =
+            std::fs::File::create(&meta_path).map_err(|err| CachedContainerSaveError::IO {
+                path: meta_path.clone(),
+                err,
+            })?;
+
         let bytes = serde_json::to_vec(self)?;
-        file.write_all(&bytes).map_err(|err| CachedContainerSaveError::IO { path: meta_path, err })?;
+        file.write_all(&bytes)
+            .map_err(|err| CachedContainerSaveError::IO {
+                path: meta_path,
+                err,
+            })?;
 
         Ok(())
     }
@@ -185,7 +192,12 @@ impl CachedContainer {
     fn save(&self, cache_dir: &Path) -> Result<(), CachedContainerSaveError> {
         let dir = self.directory(cache_dir);
         if let Err(e) = std::fs::create_dir(&dir) {
-            tracing::warn!("Failed to create directory '{}' for container {}: {}", dir.display(), self.data.id, e);
+            tracing::warn!(
+                "Failed to create directory '{}' for container {}: {}",
+                dir.display(),
+                self.data.id,
+                e
+            );
         }
 
         tracing::trace!("Saving container {} to {}", self.data.id, dir.display());
@@ -227,7 +239,7 @@ impl From<CachedContainerUpState> for deimosproto::ContainerUpState {
         match val {
             CachedContainerUpState::Dead => deimosproto::ContainerUpState::Dead,
             CachedContainerUpState::Paused => deimosproto::ContainerUpState::Paused,
-            CachedContainerUpState::Running => deimosproto::ContainerUpState::Running
+            CachedContainerUpState::Running => deimosproto::ContainerUpState::Running,
         }
     }
 }

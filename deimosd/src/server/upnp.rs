@@ -19,22 +19,20 @@ pub struct UpnpLease(tokio::task::JoinHandle<()>);
 
 impl Upnp {
     /// Renew UPNP leases every fifteen minutes
-    pub const RENEWAL_INTERVAL: Duration = Duration::from_secs(60*15);
-    
+    pub const RENEWAL_INTERVAL: Duration = Duration::from_secs(60 * 15);
+
     /// Lookup the local gateway and retrieve the local IP address from the network adapter
     pub async fn new() -> Result<Self, UpnpInitError> {
         let gateway = igd_next::aio::tokio::search_gateway(Default::default()).await?;
         let local_ip = local_ip_address::local_ip()?;
 
-        Ok(
-            Self {
-                gateway,
-                local_ip,
-            }
-        )
+        Ok(Self { gateway, local_ip })
     }
-    
-    pub async fn lease(&self, ports: impl Iterator<Item = (u16, PortMappingProtocol)>) -> UpnpLease {
+
+    pub async fn lease(
+        &self,
+        ports: impl Iterator<Item = (u16, PortMappingProtocol)>,
+    ) -> UpnpLease {
         let gateway = self.gateway.clone();
         let ports = ports.collect::<Vec<_>>();
         let local_ip = self.local_ip;
@@ -44,28 +42,35 @@ impl Upnp {
             loop {
                 interval.tick().await;
                 for (port, protocol) in &ports {
-                    match gateway.add_port(
-                        *protocol,
-                        *port,
-                        SocketAddr::new(local_ip, *port),
-                        (Self::RENEWAL_INTERVAL.as_secs() - 60) as u32,
-                        "deimos"
-                    ).await {
+                    match gateway
+                        .add_port(
+                            *protocol,
+                            *port,
+                            SocketAddr::new(local_ip, *port),
+                            (Self::RENEWAL_INTERVAL.as_secs() - 60) as u32,
+                            "deimos",
+                        )
+                        .await
+                    {
                         Ok(_) => {
                             tracing::trace!("Added UPNP lease for {} port {}", protocol, port);
-                        },
+                        }
                         Err(e) => {
-                            tracing::warn!("Failed to get UPNP lease for {} port {}: {}", protocol, port, e);
+                            tracing::warn!(
+                                "Failed to get UPNP lease for {} port {}: {}",
+                                protocol,
+                                port,
+                                e
+                            );
                         }
                     }
                 }
-            };
+            }
         };
 
         UpnpLease(tokio::task::spawn(task))
     }
 }
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum UpnpInitError {

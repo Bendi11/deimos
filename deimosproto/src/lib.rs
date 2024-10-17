@@ -1,6 +1,6 @@
 pub mod util;
 
-mod proto  {
+mod proto {
     tonic::include_proto!("deimos");
 }
 

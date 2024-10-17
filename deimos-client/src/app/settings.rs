@@ -8,7 +8,6 @@ use crate::context::Context;
 
 use super::style::{Column, Container, Element};
 
-
 #[derive(Debug, Clone)]
 pub struct Settings;
 
@@ -18,7 +17,6 @@ pub enum SettingsMessage {
     RequestTimeout(u64),
     ConnectTimeout(u64),
 }
-
 
 impl Settings {
     pub fn new() -> Self {
@@ -49,8 +47,8 @@ impl Settings {
                 Column::new().push(Text::new("gRPC Connect Timeout")).push(
                     TypedInput::new("Timeout", &ctx.state.settings.connect_timeout.as_secs())
                         .on_input(SettingsMessage::ConnectTimeout)
-                        .width(Length::Fill)
-                )
+                        .width(Length::Fill),
+                ),
             );
 
         Container::new(column)
@@ -65,7 +63,7 @@ impl Settings {
             }
             SettingsMessage::RequestTimeout(timeout) => {
                 ctx.state.settings.request_timeout = Duration::from_secs(timeout);
-            },
+            }
             SettingsMessage::ConnectTimeout(timeout) => {
                 ctx.state.settings.connect_timeout = Duration::from_secs(timeout);
             }

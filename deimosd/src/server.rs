@@ -6,8 +6,8 @@ use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
 use upnp::Upnp;
 
-mod docker;
 mod api;
+mod docker;
 mod upnp;
 
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
@@ -36,19 +36,13 @@ impl Deimos {
 
         let api = ApiState::new(&upnp, config.api).await?;
 
-        Ok(
-            Arc::new(Self {
-                docker,
-                api,
-                upnp,
-            })
-        )
+        Ok(Arc::new(Self { docker, api, upnp }))
     }
-    
+
     /// Run the server until an interrupt signal is received or a fatal error occurs
     pub async fn run(self: Arc<Self>) -> ExitCode {
         let cancel = CancellationToken::new();
-        
+
         let cancel_copy = cancel.clone();
         let this = self.clone();
         let docker = tokio::task::spawn(self.clone().docker_task(cancel.clone()));
@@ -64,7 +58,7 @@ impl Deimos {
                 Ok(sig) => sig,
                 Err(e) => {
                     tracing::error!("Failed to create SIGINT handler: {e}");
-                    return ExitCode::FAILURE
+                    return ExitCode::FAILURE;
                 }
             };
 
@@ -72,7 +66,7 @@ impl Deimos {
                 Ok(sig) => sig,
                 Err(e) => {
                     tracing::error!("Failed to create SIGTERM handler: {e}");
-                    return ExitCode::FAILURE
+                    return ExitCode::FAILURE;
                 }
             };
 
@@ -84,7 +78,7 @@ impl Deimos {
                     tracing::info!("Got SIGTERM");
                 },
             };
-            
+
             cancel.cancel();
         }
 

@@ -2,8 +2,6 @@ use std::{path::PathBuf, sync::Arc};
 
 use super::DeimosId;
 
-
-
 /// Configuration for a managed Docker container
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

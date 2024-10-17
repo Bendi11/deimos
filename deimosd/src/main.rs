@@ -25,9 +25,7 @@ async fn main() -> ExitCode {
         .without_time()
         .finish();
 
-    subscriber
-        .with(filter)
-        .init();
+    subscriber.with(filter).init();
 
     let config_buf = match util::load_check_permissions(CONFIG_PATH).await {
         Ok(v) => v,
@@ -39,7 +37,7 @@ async fn main() -> ExitCode {
 
     let Ok(config_str) = String::from_utf8(config_buf) else {
         tracing::error!("Cannot decode config file '{}' as UTF-8", CONFIG_PATH);
-        return ExitCode::FAILURE
+        return ExitCode::FAILURE;
     };
 
     let toml_de = toml::Deserializer::new(&config_str);

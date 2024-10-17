@@ -35,7 +35,7 @@ impl ButtonClass {
             border: Border {
                 radius: class.radius,
                 width: 0f32,
-                color: iced::Color::BLACK, 
+                color: iced::Color::BLACK,
             },
             background: class.background,
             shadow: class.shadow.unwrap_or_default(),
@@ -44,27 +44,30 @@ impl ButtonClass {
     }
 
     fn scale_color(color: iced::Color, modify: iced::Color) -> iced::Color {
-        iced::Color::from_rgba(color.r - color.r * modify.r, color.g - color.g * modify.g, color.b - color.b * modify.b, color.a - color.a * modify.a)
+        iced::Color::from_rgba(
+            color.r - color.r * modify.r,
+            color.g - color.g * modify.g,
+            color.b - color.b * modify.b,
+            color.a - color.a * modify.a,
+        )
     }
 
     fn modify_background(bg: iced::Background, modify: iced::Color) -> iced::Background {
         match bg {
             Background::Color(c) => Background::Color(Self::scale_color(c, modify)),
             Background::Gradient(gradient) => match gradient {
-                iced::Gradient::Linear(linear) => Background::Gradient(iced::Gradient::Linear(
-                    iced::gradient::Linear {
+                iced::Gradient::Linear(linear) => {
+                    Background::Gradient(iced::Gradient::Linear(iced::gradient::Linear {
                         angle: linear.angle,
-                        stops: linear.stops.map(|s|
-                            s.map(|stop| 
-                                iced::gradient::ColorStop {
-                                    offset: stop.offset,
-                                    color: Self::scale_color(stop.color, modify),
-                                }
-                            )
-                        )
-                    }
-                ))
-            }
+                        stops: linear.stops.map(|s| {
+                            s.map(|stop| iced::gradient::ColorStop {
+                                offset: stop.offset,
+                                color: Self::scale_color(stop.color, modify),
+                            })
+                        }),
+                    }))
+                }
+            },
         }
     }
 }
@@ -79,7 +82,7 @@ impl From<ContainerClass> for ButtonClass {
                     value
                         .background
                         .map(|c| Self::modify_background(c, iced::Color::from_rgb(0.8, 0.8, 0.8)))
-                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.2)))
+                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.2))),
                 ),
                 shadow: value.shadow,
             },
@@ -88,11 +91,13 @@ impl From<ContainerClass> for ButtonClass {
                 background: Some(
                     value
                         .background
-                        .map(|c| Self::modify_background(c, iced::Color::from_rgb(0.75, 0.75, 0.75)))
-                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.25)))
+                        .map(|c| {
+                            Self::modify_background(c, iced::Color::from_rgb(0.75, 0.75, 0.75))
+                        })
+                        .unwrap_or(Background::Color(iced::Color::from_rgba(0., 0., 0., 0.25))),
                 ),
                 shadow: value.shadow,
-            }
+            },
         }
     }
 }

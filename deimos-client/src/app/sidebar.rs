@@ -1,10 +1,21 @@
 use std::sync::Arc;
 
-use iced::{alignment::{Horizontal, Vertical}, border::Radius, widget::svg, Background, Length, Padding, Shadow, Task, Vector};
+use iced::{
+    alignment::{Horizontal, Vertical},
+    border::Radius,
+    widget::svg,
+    Background, Length, Padding, Shadow, Task, Vector,
+};
 
-use crate::context::{container::{CachedContainer, CachedContainerUpState, CachedContainerUpStateFull}, ContainerRef, Context};
+use crate::context::{
+    container::{CachedContainer, CachedContainerUpState, CachedContainerUpStateFull},
+    ContainerRef, Context,
+};
 
-use super::{style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text}, DeimosMessage};
+use super::{
+    style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text},
+    DeimosMessage,
+};
 
 #[derive(Debug)]
 pub struct Sidebar {
@@ -55,43 +66,29 @@ impl Sidebar {
                                 Svg::new(self.reload.clone())
                                     .class((orbit::MERCURY[3], orbit::SOL[0]))
                                     .height(32f32)
-                                    .width(32f32)
+                                    .width(32f32),
                             )
-                            .on_press(SidebarMessage::Refresh)
+                            .on_press(SidebarMessage::Refresh),
                         )
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                            .align_x(Horizontal::Right)
-                            .align_y(Vertical::Bottom)
-                    )
-
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .align_x(Horizontal::Right)
+                        .align_y(Vertical::Bottom),
+                    ),
             )
-            .padding(
-                Padding::default()
-                    .top(16f32)
-                    .left(0f32)
-                    .right(16f32)
-            )
+            .padding(Padding::default().top(16f32).left(0f32).right(16f32))
             .height(100);
 
         let mut containers = Column::new()
             .height(Length::FillPortion(8))
             .spacing(16)
-            .padding(
-                Padding::default()
-                    .left(10f32)
-                    .right(10f32)
-            );
+            .padding(Padding::default().left(10f32).right(10f32));
 
         for (r, container) in ctx.containers.iter() {
             containers = containers.push(self.container_button(r, container));
         }
 
-
-        let top = Column::new()
-            .spacing(32)
-            .push(header)
-            .push(containers);
+        let top = Column::new().spacing(32).push(header).push(containers);
 
         Container::new(top)
             .class(ContainerClass {
@@ -119,84 +116,77 @@ impl Sidebar {
         }
     }
 
-    fn container_button<'a>(&self, r: ContainerRef, container: &'a CachedContainer) -> Element<'a, SidebarMessage> {
+    fn container_button<'a>(
+        &self,
+        r: ContainerRef,
+        container: &'a CachedContainer,
+    ) -> Element<'a, SidebarMessage> {
         let (msg, svg) = match container.data.up {
             CachedContainerUpStateFull::Known(ref state) => match state {
-            CachedContainerUpState::Dead => (
-                    Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
-                    Svg::new(self.start.clone())
-                        .class(orbit::MERCURY[2])
+                CachedContainerUpState::Dead => (
+                    Some(SidebarMessage::UpdateContainer(
+                        r,
+                        CachedContainerUpState::Running,
+                    )),
+                    Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
                 ),
                 CachedContainerUpState::Paused => (
-                    Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Running)),
-                    Svg::new(self.start.clone())
-                        .class(orbit::MERCURY[2])
+                    Some(SidebarMessage::UpdateContainer(
+                        r,
+                        CachedContainerUpState::Running,
+                    )),
+                    Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
                 ),
                 CachedContainerUpState::Running => (
-                    Some(SidebarMessage::UpdateContainer(r, CachedContainerUpState::Dead)),
-                    Svg::new(self.stop.clone())
-                        .class(orbit::MARS[1])
-                )
+                    Some(SidebarMessage::UpdateContainer(
+                        r,
+                        CachedContainerUpState::Dead,
+                    )),
+                    Svg::new(self.stop.clone()).class(orbit::MARS[1]),
+                ),
             },
-            CachedContainerUpStateFull::UpdateRequested { .. } => (
-                None,
-                Svg::new(self.reload.clone())
-                    .class(orbit::EARTH[2])
-            )
+            CachedContainerUpStateFull::UpdateRequested { .. } => {
+                (None, Svg::new(self.reload.clone()).class(orbit::EARTH[2]))
+            }
         };
 
         let row = Row::new()
             .push(
-                Button::new(
-                    Text::new(&container.data.name)
-                )
-                .on_press(SidebarMessage::SelectContainer(r))
-                .height(Length::Fill)
-                .width(Length::FillPortion(3))
+                Button::new(Text::new(&container.data.name))
+                    .on_press(SidebarMessage::SelectContainer(r))
+                    .height(Length::Fill)
+                    .width(Length::FillPortion(3)),
             )
             .push(
                 Container::new(
-                    Button::new(
-                        svg
-                            .width(Length::Fill)
-                            .height(Length::Fill)
-                    )
-                    .on_press_maybe(msg)
-                    .height(Length::Fill)
-                    .width(Length::FillPortion(1))
-                ).class(
-                        ContainerClass {
-                            background: None,
-                            radius: Radius::new(0f32),
-                            shadow: Some(
-                                Shadow {
-                                    color: orbit::NIGHT[2],
-                                    offset: Vector::new(-0.5f32, 0f32),
-                                    blur_radius: 3f32
-                                }
-                            )
-                        }
-                    )
+                    Button::new(svg.width(Length::Fill).height(Length::Fill))
+                        .on_press_maybe(msg)
+                        .height(Length::Fill)
+                        .width(Length::FillPortion(1)),
+                )
+                .class(ContainerClass {
+                    background: None,
+                    radius: Radius::new(0f32),
+                    shadow: Some(Shadow {
+                        color: orbit::NIGHT[2],
+                        offset: Vector::new(-0.5f32, 0f32),
+                        blur_radius: 3f32,
+                    }),
+                }),
             );
 
         Container::new(row)
             .height(60f32)
             .width(Length::Fill)
-            .class(
-                ContainerClass {
-                    background: Some(
-                        Background::Color(orbit::NIGHT[0])
-                    ),
-                    radius: Radius::new(4f32),
-                    shadow: Some(
-                        Shadow {
-                            color: orbit::NIGHT[2],
-                            offset: Vector::ZERO,
-                            blur_radius: 5f32
-                        }
-                    ),
-                }
-            )
+            .class(ContainerClass {
+                background: Some(Background::Color(orbit::NIGHT[0])),
+                radius: Radius::new(4f32),
+                shadow: Some(Shadow {
+                    color: orbit::NIGHT[2],
+                    offset: Vector::ZERO,
+                    blur_radius: 5f32,
+                }),
+            })
             .into()
     }
 }

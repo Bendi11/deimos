@@ -2,13 +2,15 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use bollard::Docker;
 use config::ManagedContainerConfig;
-use tokio::{io::AsyncReadExt, sync::{watch, Mutex}};
-
+use tokio::{
+    io::AsyncReadExt,
+    sync::{watch, Mutex},
+};
 
 pub mod config;
 mod id;
 
-pub use id::{DockerId, DeimosId};
+pub use id::{DeimosId, DockerId};
 
 /// A managed container that represents a running or stopped container
 /// Maintains several invariants of the Docker container manager.
@@ -51,7 +53,7 @@ pub struct ManagedContainerShared {
 pub enum ManagedContainerRunning {
     Dead,
     Paused,
-    Running
+    Running,
 }
 
 impl<'a> ManagedContainerTransaction<'a> {
@@ -59,17 +61,17 @@ impl<'a> ManagedContainerTransaction<'a> {
     pub fn update(&self, state: Option<ManagedContainerShared>) {
         self.tx.send_replace(state);
     }
-    
+
     /// Modify the current state with the provided function
     pub fn modify<F: FnOnce(&mut Option<ManagedContainerShared>)>(&self, fun: F) {
         self.tx.send_modify(fun)
     }
-    
+
     /// Get the current state, to be modified and re-written
     pub fn state(&self) -> Option<ManagedContainerShared> {
         self.container.rx.borrow().clone()
     }
-    
+
     /// Get the container that this transaction modifies
     pub fn container(&self) -> &Arc<ManagedContainer> {
         self.container
@@ -84,7 +86,7 @@ impl<'a> AsRef<Arc<ManagedContainer>> for ManagedContainerTransaction<'a> {
 
 impl ManagedContainer {
     const CONFIG_FILENAME: &str = "container.toml";
-    
+
     /// Wait for all other transactions for this container to complete, then begin a new
     /// transaction allowing state changes
     pub async fn transaction(self: &Arc<Self>) -> ManagedContainerTransaction {
@@ -93,16 +95,20 @@ impl ManagedContainer {
             tx: self.tx.lock().await,
         }
     }
-    
+
     /// Get a reference to the most recent shared state without blocking
     pub fn state(&self) -> watch::Ref<'_, Option<ManagedContainerShared>> {
         self.rx.borrow()
     }
-    
+
     /// Get a new future that resolves when the shared state for this container has been mutated
     pub async fn wait_change(&self) {
         if let Err(e) = self.rx.clone().changed().await {
-            tracing::error!("Failed to wait on status changes for container {}: {}", self.deimos_id(), e);
+            tracing::error!(
+                "Failed to wait on status changes for container {}: {}",
+                self.deimos_id(),
+                e
+            );
         }
     }
 
@@ -117,21 +123,30 @@ impl ManagedContainer {
             "Loading container from config file {}",
             config_path.display()
         );
-        
 
+        let mut config_file = tokio::fs::File::open(&config_path).await.map_err(|err| {
+            ManagedContainerLoadError::ConfigFileIO {
+                path: config_path.clone(),
+                err,
+            }
+        })?;
 
-        let mut config_file = tokio::fs::File::open(&config_path)
-            .await
-            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err})?;
-    
-        let mut config_str = String::with_capacity(config_file.metadata().await.map(|m| m.len()).unwrap_or(512) as usize);
+        let mut config_str = String::with_capacity(
+            config_file.metadata().await.map(|m| m.len()).unwrap_or(512) as usize,
+        );
         config_file
             .read_to_string(&mut config_str)
             .await
-            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err })?;
+            .map_err(|err| ManagedContainerLoadError::ConfigFileIO {
+                path: config_path.clone(),
+                err,
+            })?;
 
         let config = toml::de::from_str::<ManagedContainerConfig>(&config_str)?;
-        tracing::trace!("Found docker container with container name \"{}\"", config.name);
+        tracing::trace!(
+            "Found docker container with container name \"{}\"",
+            config.name
+        );
 
         let image_inspect = docker.inspect_image(&config.docker.image).await?;
         match image_inspect.id {
@@ -145,70 +160,59 @@ impl ManagedContainer {
                 let (tx, rx) = watch::channel(None);
                 let tx = Mutex::new(tx);
 
-                Ok(
-                    Self {
-                        dir,
-                        config,
-                        tx,
-                        rx,
-                    }
-                )
+                Ok(Self {
+                    dir,
+                    config,
+                    tx,
+                    rx,
+                })
             }
             None => Err(ManagedContainerLoadError::MissingImage(config.docker.image)),
         }
     }
-    
+
     /// Get the container configuration options to use when creating a docker container
     pub(super) fn docker_config(&self) -> bollard::container::Config<String> {
         let image = Some(self.config.docker.image.clone());
 
-        let exposed_ports = (!self.config.docker.port.is_empty())
-            .then(||
-                self
-                    .config
-                    .docker
-                    .port
-                    .iter()
-                    .map(
-                        |conf| (format!("{}/{}", conf.expose, conf.protocol.docker_name()), HashMap::new())
+        let exposed_ports = (!self.config.docker.port.is_empty()).then(|| {
+            self.config
+                .docker
+                .port
+                .iter()
+                .map(|conf| {
+                    (
+                        format!("{}/{}", conf.expose, conf.protocol.docker_name()),
+                        HashMap::new(),
                     )
-                    .collect()
-            );
+                })
+                .collect()
+        });
 
-        let env = (!self.config.docker.env.is_empty())
-            .then(||
-                self
-                    .config
-                    .docker
-                    .env
-                    .iter()
-                    .map(
-                        |var| format!("{}={}", var.key, var.value)
-                    )
-                    .collect()
-            );
+        let env = (!self.config.docker.env.is_empty()).then(|| {
+            self.config
+                .docker
+                .env
+                .iter()
+                .map(|var| format!("{}={}", var.key, var.value))
+                .collect()
+        });
 
         tracing::trace!("Env is {:#?}", env);
 
-        let binds = (!self.config.docker.volume.is_empty())
-            .then(||
-                self
-                    .config
-                    .docker
-                    .volume
-                    .iter()
-                    .map(
-                        |volume| format!("{}:{}", volume.local.display(), volume.container.display())
-                    )
-                    .collect()
-            );
+        let binds = (!self.config.docker.volume.is_empty()).then(|| {
+            self.config
+                .docker
+                .volume
+                .iter()
+                .map(|volume| format!("{}:{}", volume.local.display(), volume.container.display()))
+                .collect()
+        });
 
-        let host_config = Some(
-            bollard::models::HostConfig {
-                binds,
-                ..Default::default()
-            }
-        );
+        let host_config = Some(bollard::models::HostConfig {
+            binds,
+            ..Default::default()
+        });
 
         bollard::container::Config {
             image,
@@ -236,10 +240,7 @@ pub enum ManagedContainerError {
 #[derive(Debug, thiserror::Error)]
 pub enum ManagedContainerLoadError {
     #[error("Failed to load container from config file {path}: {err}")]
-    ConfigFileIO {
-        path: PathBuf,
-        err: std::io::Error,
-    },
+    ConfigFileIO { path: PathBuf, err: std::io::Error },
     #[error("Config file had invalid modified datetime {}", .0)]
     InvalidDateTime(std::time::SystemTimeError),
     #[error("Failed to parse config as TOML: {0}")]
