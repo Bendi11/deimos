@@ -12,6 +12,8 @@ mod id;
 
 pub use id::{DeimosId, DockerId};
 
+use crate::server::upnp::{UpnpError, UpnpLease};
+
 /// A managed container that represents a running or stopped container
 /// Maintains several invariants of the Docker container manager.
 /// - One mutating Docker request may take place at a time per container
@@ -47,6 +49,8 @@ pub struct ManagedContainerShared {
     pub running: ManagedContainerRunning,
     /// Task listening for events propogated by the docker container
     pub listener: Arc<tokio::task::JoinHandle<()>>,
+    /// Lease for ports requested from the UPnP manager
+    pub upnp_lease: UpnpLease,
 }
 
 #[derive(Clone, Copy)]
@@ -94,6 +98,15 @@ impl ManagedContainer {
             container: self,
             tx: self.tx.lock().await,
         }
+    }
+    
+    /// Attempt to start a transaction, returning `Some` if there are no ongoing transactions
+    pub fn try_transaction(self: &Arc<Self>) -> Option<ManagedContainerTransaction> {
+        self
+            .tx
+            .try_lock()
+            .ok()
+            .map(|tx| ManagedContainerTransaction { container: self, tx, })
     }
 
     /// Get a reference to the most recent shared state without blocking
@@ -235,6 +248,8 @@ pub type BollardError = bollard::errors::Error;
 pub enum ManagedContainerError {
     #[error("Docker API error: {0}")]
     Bollard(#[from] BollardError),
+    #[error("UPNP error: {0}")]
+    Upnp(#[from] UpnpError),
 }
 
 #[derive(Debug, thiserror::Error)]

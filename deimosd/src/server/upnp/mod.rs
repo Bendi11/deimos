@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::ops::Deref;
 use std::sync::Arc;
 
 use std::time::Duration;
@@ -41,43 +40,6 @@ pub struct UpnpLease {
     ports: Arc<[u16]>
 }
 
-impl UpnpLeases {
-    /// Request a new collection of ports to be forwarded
-    pub async fn add(&self, ports: impl IntoIterator<Item = UpnpLeaseData>) -> Result<UpnpLease, UpnpError> {
-        let lease_data = ports.into_iter().collect::<Vec<_>>();
-
-        let mut map = self.map.lock().await;
-        for data in lease_data.iter() {
-            if map.contains_key(&data.port) {
-                return Err(UpnpError::InUse(data.port))
-            }
-        }
-        
-        let ports = lease_data.iter().map(|data| data.port).collect::<Arc<[_]>>(); 
-        map.extend(lease_data.into_iter().map(|data| (data.port, data)));
-        
-        Ok(
-            UpnpLease {
-                leases: self.clone(),
-                ports,
-            }
-        )
-    }
-    
-    /// Drop the given forwarded ports from the map.
-    /// This function can be called from both async and non-async contexts - so `Drop`
-    /// implementations can use it safely.
-    pub fn drop(&self, ports: impl IntoIterator<Item = u16>) {
-        let mut map = match tokio::runtime::Handle::try_current() {
-            Ok(rt) => rt.block_on(self.map.lock()),
-            Err(_) => self.map.blocking_lock()
-        };
-
-        for port in ports {
-            map.remove(&port);
-        }
-    }
-}
 
 impl Deimos {
     /// Run a task to refresh all UPnP leases periodically
@@ -168,6 +130,44 @@ impl Upnp {
         self.refresh.notify_one();
 
         Ok(lease)
+    }
+}
+
+impl UpnpLeases {
+    /// Request a new collection of ports to be forwarded
+    pub async fn add(&self, ports: impl IntoIterator<Item = UpnpLeaseData>) -> Result<UpnpLease, UpnpError> {
+        let lease_data = ports.into_iter().collect::<Vec<_>>();
+
+        let mut map = self.map.lock().await;
+        for data in lease_data.iter() {
+            if map.contains_key(&data.port) {
+                return Err(UpnpError::InUse(data.port))
+            }
+        }
+        
+        let ports = lease_data.iter().map(|data| data.port).collect::<Arc<[_]>>(); 
+        map.extend(lease_data.into_iter().map(|data| (data.port, data)));
+        
+        Ok(
+            UpnpLease {
+                leases: self.clone(),
+                ports,
+            }
+        )
+    }
+    
+    /// Drop the given forwarded ports from the map.
+    /// This function can be called from both async and non-async contexts - so `Drop`
+    /// implementations can use it safely.
+    pub fn drop(&self, ports: impl IntoIterator<Item = u16>) {
+        let mut map = match tokio::runtime::Handle::try_current() {
+            Ok(rt) => rt.block_on(self.map.lock()),
+            Err(_) => self.map.blocking_lock()
+        };
+
+        for port in ports {
+            map.remove(&port);
+        }
     }
 }
 

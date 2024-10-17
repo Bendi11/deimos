@@ -13,7 +13,7 @@ use super::container::{DeimosId, ManagedContainer};
 /// Service managing the creation and removal of Docker containers
 pub struct DockerState {
     pub config: DockerConfig,
-    pub docker: Docker,
+    pub api: Docker,
     /// Map of managed container IDs to their config and state
     pub containers: HashMap<DeimosId, Arc<ManagedContainer>>,
     pub status_stream: StatusStream,
@@ -147,7 +147,7 @@ impl DockerState {
 
         Ok(Self {
             config,
-            docker,
+            api: docker,
             containers,
             status_stream,
         })

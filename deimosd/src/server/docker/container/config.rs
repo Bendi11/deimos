@@ -50,7 +50,7 @@ pub struct ManagedContainerDockerPortConfig {
 }
 
 /// Selectable protocol for forwarded port
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
 pub enum ManagedContainerDockerPortProtocol {
     #[serde(rename = "udp")]
     Udp,
@@ -71,6 +71,15 @@ impl ManagedContainerDockerPortProtocol {
         match self {
             Self::Udp => "udp",
             Self::Tcp => "tcp",
+        }
+    }
+}
+
+impl From<ManagedContainerDockerPortProtocol> for igd_next::PortMappingProtocol {
+    fn from(value: ManagedContainerDockerPortProtocol) -> Self {
+        match value {
+            ManagedContainerDockerPortProtocol::Udp => Self::UDP,
+            ManagedContainerDockerPortProtocol::Tcp => Self::TCP,
         }
     }
 }

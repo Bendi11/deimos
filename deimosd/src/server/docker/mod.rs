@@ -12,6 +12,8 @@ use container::{
 use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
+use crate::server::upnp::UpnpLeaseData;
+
 use super::Deimos;
 
 pub mod container;
@@ -36,7 +38,7 @@ impl Deimos {
         };
 
         self.docker
-            .docker
+            .api
             .start_container(&docker_id, Option::<StartContainerOptions<String>>::None)
             .await?;
 
@@ -60,19 +62,11 @@ impl Deimos {
             return Ok(state.docker_id.clone());
         }
 
-        let config = managed.docker_config();
-
         let response = self
             .docker
-            .docker
-            .create_container::<String, String>(None, config)
+            .api
+            .create_container::<String, String>(None, managed.docker_config())
             .await?;
-
-        tracing::trace!(
-            "Created container with ID {} for {}",
-            response.id,
-            managed.deimos_id()
-        );
 
         for warning in response.warnings {
             tracing::warn!(
@@ -82,67 +76,87 @@ impl Deimos {
             );
         }
 
-        self.docker
+        let docker_id = DockerId::from(response.id);
+
+        tracing::trace!(
+            "Created container with ID {} for {}",
+            docker_id,
+            managed.deimos_id()
+        );
+
+        let listener = Arc::new(self.clone().subscribe_container_events(tx, docker_id.clone()));
+        
+        let forwarded_ports = managed
+            .config
             .docker
+            .port
+            .iter()
+            .filter(|port| port.upnp)
+            .map(|port| UpnpLeaseData {
+                    name: String::from(&*managed.config.name),
+                    port: port.expose,
+                    protocol: port.protocol.into(),
+                }
+            );
+
+        let upnp_lease = self.upnp.request(forwarded_ports).await?;
+
+        let state = ManagedContainerShared {
+            docker_id,
+            running: ManagedContainerRunning::Dead,
+            listener,
+            upnp_lease,
+        };
+
+        tx.update(Some(state.clone()));
+
+        if let Err(e) = self.docker
+            .api
             .rename_container(
-                &response.id,
+                &state.docker_id,
                 bollard::container::RenameContainerOptions {
                     name: managed.deimos_id().owned(),
                 },
             )
-            .await?;
+            .await {
+            tracing::error!("Failed to rename docker container - destroying container");
+            self.destroy(tx).await?;
+            return Err(e.into())
+        }
 
-        tracing::trace!("Renamed container {}", managed.deimos_id());
+        tracing::trace!("Renamed container {} to {}", &state.docker_id, managed.deimos_id());
 
-        let mut filters = HashMap::new();
-        filters.insert("id".to_owned(), vec![response.id.clone()]);
-        let opts = EventsOptions {
-            filters,
-            ..Default::default()
-        };
-
-        let docker_id = DockerId::from(response.id);
-
-        let subscription = self.docker.docker.events(Some(opts));
-        let listener = self.clone().subscribe_container_events(
-            subscription,
-            managed.clone(),
-            docker_id.clone(),
-        );
-
-        let listener = Arc::new(listener);
-
-        tracing::trace!(
-            "Subscribed to events for container {}: {}",
-            managed.deimos_id(),
-            docker_id
-        );
-
-        tx.update(Some(ManagedContainerShared {
-            docker_id: docker_id.clone(),
-            running: ManagedContainerRunning::Dead,
-            listener,
-        }));
-
-        Ok(docker_id)
+        Ok(state.docker_id)
     }
 
     /// Spawn a new task that monitors a stream of Docker events for the given container
     fn subscribe_container_events(
         self: Arc<Self>,
-        mut subscription: impl Stream<Item = Result<EventMessage, bollard::errors::Error>>
-            + Send
-            + Unpin
-            + 'static,
-        managed: Arc<ManagedContainer>,
+        tx: &ManagedContainerTransaction,
         id: DockerId,
     ) -> tokio::task::JoinHandle<()> {
+        let container = tx.container().clone();
+
+        let mut filters = HashMap::new();
+        filters.insert("id".to_owned(), vec![id.owned()]);
+        let opts = EventsOptions {
+            filters,
+            ..Default::default()
+        };
+
+        let mut subscription = self.docker.api.events(Some(opts));
+        tracing::trace!(
+            "Subscribed to events for container {}: {}",
+            container.deimos_id(),
+            id,
+        );
+
         tokio::task::spawn(async move {
             while let Some(event) = subscription.next().await {
                 match event {
                     Ok(event) => {
                         self.clone()
-                            .handle_container_event(id.clone(), managed.clone(), event)
+                            .handle_container_event(container.clone(), event)
                             .await
                     }
                     Err(e) => {
@@ -157,16 +171,15 @@ impl Deimos {
     /// a notification of state change
     async fn handle_container_event(
         self: Arc<Self>,
-        id: DockerId,
         managed: Arc<ManagedContainer>,
         event: EventMessage,
     ) {
+        // Only handle unexpected events - those that occur when there is no ongoing transaction
+        let Some(mut tx) = managed.try_transaction() else { return };
         let Some(action) = event.action else { return };
-        let mut tx = managed.transaction().await;
 
         tracing::trace!(
-            "Container {} for {} got event '{}'",
-            id,
+            "Container {} got event '{}'",
             managed.deimos_id(),
             action.as_str()
         );
@@ -181,10 +194,7 @@ impl Deimos {
 
         match action.as_str() {
             "oom" => {
-                tracing::error!(
-                    "Container {} out of memory received - destroying container",
-                    id
-                );
+                tracing::error!("Container out of memory received - destroying container");
                 if let Err(e) = self.destroy(&mut tx).await {
                     tracing::error!("Failed to destroy container after OOM received: {e}");
                 }
@@ -192,11 +202,17 @@ impl Deimos {
             "destroy" => {
                 tx.update(None);
             }
-            "die" => {}
-            "kill" => {}
+            "die" => {
+                tracing::warn!("Container {} unexpectedly died - destroying container", tx.container().deimos_id());
+                tx.modify(set_running(ManagedContainerRunning::Dead));
+                if let Err(e) = self.destroy(&mut tx).await {
+                    tracing::error!("Failed to destroy container after unexpected die: {e}");
+                }
+            },
+            "kill" => {},
             "paused" => {
                 tx.modify(set_running(ManagedContainerRunning::Paused));
-            }
+            },
             "unpause" => {
                 tx.modify(set_running(ManagedContainerRunning::Running));
             }
@@ -216,7 +232,7 @@ impl Deimos {
         self: Arc<Self>,
         tx: &mut ManagedContainerTransaction<'_>,
     ) -> Result<(), ManagedContainerError> {
-        let Some(state) = tx.state() else {
+        let Some(mut state) = tx.state() else {
             return Ok(());
         };
 
@@ -226,21 +242,23 @@ impl Deimos {
         tracing::trace!("Waiting on container {} to stop", id);
         match self
             .docker
-            .docker
+            .api
             .stop_container(&id, Some(StopContainerOptions { t: 60 * 3 }))
             .await
         {
             Ok(_) => {
                 tracing::trace!("Stopped container {}", id);
             }
-            Err(BollardError::RequestTimeoutError) => {
-                tracing::error!("");
+            Err(e) => {
+                tracing::error!("Error while stopping container {} for {}: {}", state.docker_id, tx.container().deimos_id(), e);
             }
-            Err(e) => return Err(e.into()),
         }
 
+        state.running = ManagedContainerRunning::Dead;
+        tx.update(Some(state));
+
         self.docker
-            .docker
+            .api
             .remove_container(
                 &id,
                 Some(RemoveContainerOptions {
