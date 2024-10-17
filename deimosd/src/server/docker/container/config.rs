@@ -1,5 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
+use super::DeimosId;
+
 
 
 /// Configuration for a managed Docker container
@@ -7,13 +9,9 @@ use std::{path::PathBuf, sync::Arc};
 #[serde(deny_unknown_fields)]
 pub struct ManagedContainerConfig {
     /// ID of the container, must remain constant over server renames
-    pub id: Arc<str>,
+    pub id: DeimosId,
     /// Name that identifies this container
     pub name: Arc<str>,
-    /// Banner image to be displayed in user interfaces
-    pub banner_path: Option<PathBuf>,
-    /// Icon image to be displayed in user interfaces
-    pub icon_path: Option<PathBuf>,
     /// Configuration for the Docker container
     pub docker: ManagedContainerDockerConfig,
 }

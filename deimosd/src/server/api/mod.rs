@@ -1,12 +1,8 @@
-use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use igd_next::PortMappingProtocol;
-use tokio::sync::{broadcast, Mutex};
 use async_trait::async_trait;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use tonic::transport::Identity;
@@ -19,14 +15,14 @@ use super::Deimos;
 
 use deimosproto::{self as proto, ContainerStatusNotification};
 
-/// A connection to a remote client, with references to state required to serve RPC requests
+/// State required exclusively for the gRPC server including UPnP port leases.
 pub struct ApiState {
     pub config: ApiConfig,
     /// Address leased for the API
     pub lease: Option<UpnpLease>,
 }
 
-/// Configuration used to initialize and inform the Deimos API service
+/// Configuration used to initialize the Deimos gRPC API server.
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApiConfig {
@@ -63,6 +59,9 @@ impl ApiState {
 }
 
 impl Deimos {
+    /// Load all specified certificates from the paths specified in the config and attempt to run
+    /// the server to completion.
+    /// This method should not return until the [CancellationToken] has been cancelled.
     pub async fn serve_api(self: Arc<Self>, cancel: CancellationToken) -> Result<(), ApiInitError> {
         /*let mut ca_cert_pem = util::load_check_permissions(&self.api.config.certificate)
             .await
@@ -110,9 +109,14 @@ impl Deimos {
         
         Ok(())
     }
-
+    
+    /// Translate the current state of a managed container to an enum that can be serialized to
+    /// protobuf and sent to clients
     fn container_api_run_status(state: &Option<ManagedContainerShared>) -> deimosproto::ContainerUpState {
-        state.as_ref().map(|s| proto::ContainerUpState::from(s.running)).unwrap_or(proto::ContainerUpState::Dead)
+        state
+            .as_ref()
+            .map(|s| proto::ContainerUpState::from(s.running))
+            .unwrap_or(proto::ContainerUpState::Dead)
     }
 }
 
@@ -144,19 +148,8 @@ impl proto::DeimosService for Deimos {
             tonic::Response::new(proto::QueryContainersResponse { containers, })
         )
     }
-
-    async fn get_container_image(self: Arc<Self>, _req: tonic::Request<proto::ContainerImagesRequest>) -> Result<tonic::Response<proto::ContainerImagesResponse>, tonic::Status> {
-        Ok(
-            tonic::Response::new(
-                proto::ContainerImagesResponse {
-                    banner: None,
-                    icon: None
-                }
-            )
-        )
-    }
-
-    type ContainerStatusStreamStream = futures::stream::Map<
+    
+    type SubscribeContainerStatusStream = futures::stream::Map<
         StatusStream,
         Box<dyn
             FnMut(Arc<ManagedContainer>) -> Result<proto::ContainerStatusNotification, tonic::Status>
@@ -164,15 +157,17 @@ impl proto::DeimosService for Deimos {
         >
     >;
 
-    async fn container_status_stream(self: Arc<Self>, _: tonic::Request<proto::ContainerStatusStreamRequest>) -> Result<tonic::Response<Self::ContainerStatusStreamStream>, tonic::Status> {
+    async fn subscribe_container_status(self: Arc<Self>, _: tonic::Request<proto::ContainerStatusStreamRequest>) -> Result<tonic::Response<Self::SubscribeContainerStatusStream>, tonic::Status> {
         Ok(
             tonic::Response::new(
-                self.docker.subscribe_state_stream()
+                self
+                    .docker
+                    .subscribe_state_stream()
                     .map(
                         Box::new(
                             |container: Arc<ManagedContainer>|Ok(
                                 proto::ContainerStatusNotification {
-                                    container_id: container.managed_id().to_owned(),
+                                    container_id: container.deimos_id().owned(),
                                     up_state: Self::container_api_run_status(&container.state()) as i32
                                 }
                             )
@@ -185,7 +180,7 @@ impl proto::DeimosService for Deimos {
     async fn update_container(self: Arc<Self>, req: tonic::Request<proto::UpdateContainerRequest>) -> Result<tonic::Response<proto::UpdateContainerResponse>, tonic::Status> {
         let req = req.into_inner();
         let Ok(method) = proto::ContainerUpState::try_from(req.method) else { return Err(tonic::Status::invalid_argument("Request method")) };
-        match self.docker.containers.get(&req.id).cloned() {
+        match self.docker.containers.get(req.id.as_str()).cloned() {
             Some(c) => {
                 match method {
                     proto::ContainerUpState::Running => {
@@ -233,7 +228,9 @@ pub enum ApiInitError {
 }
 
 impl ApiConfig {
-    pub fn default_timeout() -> Duration {
+    /// Get the default gRPC timeout, used to provide a value for `serde`'s automatic Deserialize
+    /// implementation
+    pub const fn default_timeout() -> Duration {
         Duration::from_secs(120)
     }
 }

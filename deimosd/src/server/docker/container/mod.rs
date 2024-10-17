@@ -1,13 +1,14 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::SystemTime};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use bollard::Docker;
-use chrono::{DateTime, Utc};
 use config::ManagedContainerConfig;
-use futures::Stream;
-use tokio::{io::AsyncReadExt, sync::{broadcast, watch, Mutex}};
+use tokio::{io::AsyncReadExt, sync::{watch, Mutex}};
 
 
 pub mod config;
+mod id;
+
+pub use id::{DockerId, DeimosId};
 
 /// A managed container that represents a running or stopped container
 /// Maintains several invariants of the Docker container manager.
@@ -39,7 +40,7 @@ pub struct ManagedContainerTransaction<'a> {
 #[derive(Clone)]
 pub struct ManagedContainerShared {
     /// ID of the container running for this
-    pub docker_id: Arc<str>,
+    pub docker_id: DockerId,
     /// Status of the container in Docker
     pub running: ManagedContainerRunning,
     /// Task listening for events propogated by the docker container
@@ -97,9 +98,12 @@ impl ManagedContainer {
     pub fn state(&self) -> watch::Ref<'_, Option<ManagedContainerShared>> {
         self.rx.borrow()
     }
-
+    
+    /// Get a new future that resolves when the shared state for this container has been mutated
     pub async fn wait_change(&self) {
-        self.rx.clone().changed().await;
+        if let Err(e) = self.rx.clone().changed().await {
+            tracing::error!("Failed to wait on status changes for container {}: {}", self.deimos_id(), e);
+        }
     }
 
     /// Load a new managed container from the given configuration file, ensuring that the image
@@ -127,7 +131,7 @@ impl ManagedContainer {
             .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err })?;
 
         let config = toml::de::from_str::<ManagedContainerConfig>(&config_str)?;
-        tracing::trace!("Found docker container with container name {}", config.name);
+        tracing::trace!("Found docker container with container name \"{}\"", config.name);
 
         let image_inspect = docker.inspect_image(&config.docker.image).await?;
         match image_inspect.id {
@@ -216,15 +220,17 @@ impl ManagedContainer {
     }
 
     /// Get the name of the Docker container when run
-    pub fn managed_id(&self) -> &str {
+    pub fn deimos_id(&self) -> &DeimosId {
         &self.config.id
     }
 }
 
+pub type BollardError = bollard::errors::Error;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ManagedContainerError {
     #[error("Docker API error: {0}")]
-    Bollard(#[from] bollard::errors::Error),
+    Bollard(#[from] BollardError),
 }
 
 #[derive(Debug, thiserror::Error)]

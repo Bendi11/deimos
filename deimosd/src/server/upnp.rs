@@ -33,7 +33,7 @@ impl Upnp {
             }
         )
     }
-
+    
     pub async fn lease(&self, ports: impl Iterator<Item = (u16, PortMappingProtocol)>) -> UpnpLease {
         let gateway = self.gateway.clone();
         let ports = ports.collect::<Vec<_>>();

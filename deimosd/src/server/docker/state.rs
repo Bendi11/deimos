@@ -1,15 +1,14 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use bollard::Docker;
-use dashmap::DashMap;
 use fork_stream::{Forked, StreamExt};
-use futures::{Future, FutureExt, Stream};
-use tokio::sync::{broadcast, watch};
+use futures::Stream;
+use tokio::sync::watch;
 use tokio_util::sync::ReusableBoxFuture;
 
 use crate::server::docker::container::ManagedContainerShared;
 
-use super::container::ManagedContainer;
+use super::container::{DeimosId, ManagedContainer};
 
 
 
@@ -18,7 +17,7 @@ pub struct DockerState {
     pub config: DockerConfig,
     pub docker: Docker,
     /// Map of managed container IDs to their config and state
-    pub containers: HashMap<String, Arc<ManagedContainer>>,
+    pub containers: HashMap<DeimosId, Arc<ManagedContainer>>,
     pub status_stream: StatusStream,
 }
 
@@ -119,9 +118,10 @@ impl DockerState {
 
             match container {
                 Ok(c) => {
-                    let name = c.managed_id().to_owned();
-                    if containers.insert(name.clone(), Arc::new(c)).is_some() {
-                        return Err(DockerInitError::DuplicateConfiguration(name));
+                    let c = Arc::new(c);
+                    let deimos_id = c.deimos_id().clone();
+                    if containers.insert(deimos_id.clone(), c).is_some() {
+                        return Err(DockerInitError::DuplicateConfiguration(deimos_id));
                     }
                 }
                 Err(e) => {
@@ -170,7 +170,7 @@ pub enum DockerInitError {
         err: std::io::Error
     },
     #[error("Duplicate configurations detected for docker container with name {0}")]
-    DuplicateConfiguration(String),
+    DuplicateConfiguration(DeimosId),
 }
 
 pub struct ContainerStatusStreamer {

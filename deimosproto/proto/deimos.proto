@@ -5,17 +5,14 @@ package deimos;
 import public "container.proto";
 import public "status.proto";
 import public "query.proto";
-import public "img.proto";
 import public "update.proto";
 
 
 service DeimosService {
     // List brief descriptions of all containers managed by the server
     rpc QueryContainers(QueryContainersRequest) returns(QueryContainersResponse);
-
-    rpc GetContainerImage(ContainerImagesRequest) returns(ContainerImagesResponse);
-
-    rpc ContainerStatusStream(ContainerStatusStreamRequest) returns(stream ContainerStatusNotification);
+    
+    rpc SubscribeContainerStatus(ContainerStatusStreamRequest) returns(stream ContainerStatusNotification);
 
     rpc UpdateContainer(UpdateContainerRequest) returns(UpdateContainerResponse);
 }

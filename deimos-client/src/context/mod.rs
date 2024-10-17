@@ -74,7 +74,7 @@ impl Context {
 
     async fn subscribe_container_events(api: Arc<Mutex<DeimosServiceClient<Channel>>>) -> impl Stream<Item = Result<deimosproto::ContainerStatusNotification, tonic::Status>> {
         loop {
-            let result = api.lock().await.container_status_stream(deimosproto::ContainerStatusStreamRequest {}).await;
+            let result = api.lock().await.subscribe_container_status(deimosproto::ContainerStatusStreamRequest {}).await;
             match result {
                 Ok(stream) => break stream.into_inner(),
                 Err(e) => {

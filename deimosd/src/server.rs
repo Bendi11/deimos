@@ -2,7 +2,6 @@ use std::{process::ExitCode, sync::Arc};
 
 use api::{ApiConfig, ApiInitError, ApiState};
 use docker::{state::DockerConfig, DockerState};
-use futures::StreamExt;
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
 use upnp::Upnp;
