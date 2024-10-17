@@ -30,7 +30,7 @@ impl Deimos {
             .docker
             .start_container(&docker_id, Option::<StartContainerOptions<String>>::None).await?;
 
-        tracing::trace!("Starting container {} for '{}'", docker_id, tx.container().container_name());
+        tracing::trace!("Starting container {} for '{}'", docker_id, tx.container().managed_id());
 
         Ok(docker_id)
     }
@@ -51,10 +51,10 @@ impl Deimos {
             )
             .await?;
 
-        tracing::trace!("Created container with ID {} for {}", response.id, managed.container_name());
+        tracing::trace!("Created container with ID {} for {}", response.id, managed.managed_id());
 
         for warning in response.warnings {
-            tracing::warn!("Warning when creating container {}: {}", managed.container_name(), warning);
+            tracing::warn!("Warning when creating container {}: {}", managed.managed_id(), warning);
         }
 
         self
@@ -62,11 +62,11 @@ impl Deimos {
             .docker
             .rename_container(
                 &response.id,
-                bollard::container::RenameContainerOptions { name: managed.container_name().to_owned() }
+                bollard::container::RenameContainerOptions { name: managed.managed_id().to_owned() }
             )
             .await?;
 
-        tracing::trace!("Renamed container {}", managed.container_name());
+        tracing::trace!("Renamed container {}", managed.managed_id());
 
         let mut filters = HashMap::new();
         filters.insert("id".to_owned(), vec![response.id.clone()]);
@@ -84,7 +84,7 @@ impl Deimos {
 
         let listener = Arc::new(listener);
 
-        tracing::trace!("Subscribed to events for container '{}': {}", managed.container_name(), docker_id);
+        tracing::trace!("Subscribed to events for container '{}': {}", managed.managed_id(), docker_id);
 
         tx.update(Some(
             ManagedContainerShared {
@@ -122,7 +122,7 @@ impl Deimos {
         let Some(action) = event.action else { return };
         let tx = managed.transaction().await;
 
-        tracing::trace!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
+        tracing::trace!("Container {} for {} got event '{}'", id, managed.managed_id(), action.as_str());
         
         let set_running = |running| move |state: &mut Option<ManagedContainerShared>| {
             if let Some(ref mut state) = state {
@@ -178,12 +178,12 @@ impl Deimos {
             })
         ).await?;
 
-        tracing::info!("Stopped and removed container {} for {}", id, tx.container().container_name());
+        tracing::info!("Stopped and removed container {} for {}", id, tx.container().managed_id());
          
         handle.abort();
         tx.update(None);
 
-        tracing::trace!("Aborted event listener for {}", tx.container().container_name());
+        tracing::trace!("Aborted event listener for {}", tx.container().managed_id());
 
         Ok(())
     }
@@ -203,7 +203,7 @@ impl Deimos {
 
     /// Attempt to stop all running containers, e.g. for graceful server shutdown
     pub async fn stop_all(self: Arc<Self>) {
-        let containers = self.docker.containers.iter().map(|entry| entry.value().clone()).collect::<Vec<_>>();
+        let containers = self.docker.containers.values().cloned().collect::<Vec<_>>();
         let tasks = containers
             .into_iter()
             .map(
@@ -211,7 +211,9 @@ impl Deimos {
                     let this = self.clone();
                     tokio::task::spawn(async move {
                         let mut tx = container.transaction().await;
-                        this.destroy(&mut tx);
+                        if let Err(e) = this.destroy(&mut tx).await {
+                            tracing::error!("Failed to destroy container '{}' while shutting down: {}", tx.container().managed_id(), e);
+                        }
                     })
                 }
             );

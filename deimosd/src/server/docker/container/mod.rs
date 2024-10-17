@@ -3,6 +3,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::SystemTime};
 use bollard::Docker;
 use chrono::{DateTime, Utc};
 use config::ManagedContainerConfig;
+use futures::Stream;
 use tokio::{io::AsyncReadExt, sync::{broadcast, watch, Mutex}};
 
 
@@ -21,12 +22,10 @@ pub struct ManagedContainer {
     /// Directory that the container's config file was loaded from, used to build relative paths
     /// specified in the config
     dir: PathBuf,
-    /// Broadcast channel used to notify the gRPC server of state changes in the container
-    api_notify: tokio::sync::broadcast::Sender<Arc<ManagedContainer>>,
     /// Mutex here to allow only one mutating Docker request at a time
     tx: Mutex<watch::Sender<Option<ManagedContainerShared>>>,
     /// Receiver used to access the most recent instance of shared state without blocking
-    rx: watch::Receiver<Option<ManagedContainerShared>>,
+    pub(super) rx: watch::Receiver<Option<ManagedContainerShared>>,
 }
 
 /// A guard allowing mutation of the given container's shared state, representing a single
@@ -99,12 +98,15 @@ impl ManagedContainer {
         self.rx.borrow()
     }
 
+    pub async fn wait_change(&self) {
+        self.rx.clone().changed().await;
+    }
+
     /// Load a new managed container from the given configuration file, ensuring that the image
     /// name given in the config exists in the local Docker engine
     pub(super) async fn load_from_dir(
         dir: PathBuf,
         docker: &Docker,
-        api_notify: broadcast::Sender<Arc<Self>>,
     ) -> Result<Self, ManagedContainerLoadError> {
         let config_path = dir.join(Self::CONFIG_FILENAME);
         tracing::trace!(
@@ -145,7 +147,6 @@ impl ManagedContainer {
                         config,
                         tx,
                         rx,
-                        api_notify,
                     }
                 )
             }
@@ -215,7 +216,7 @@ impl ManagedContainer {
     }
 
     /// Get the name of the Docker container when run
-    pub fn container_name(&self) -> &str {
+    pub fn managed_id(&self) -> &str {
         &self.config.id
     }
 }
@@ -241,12 +242,4 @@ pub enum ManagedContainerLoadError {
     Bollard(#[from] bollard::errors::Error),
     #[error("Container config references nonexistent Docker image '{0}'. Try ensuring that you have pulled the image from a Docker registry")]
     MissingImage(String),
-}
-
-impl Drop for ManagedContainerTransaction<'_> {
-    fn drop(&mut self) {
-        if let Err(e) = self.container.api_notify.send(self.container.clone()) {
-            tracing::error!("Failed to send container transaction update to channel: {e}");
-        }
-    }
 }

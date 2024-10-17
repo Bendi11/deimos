@@ -1,8 +1,13 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use bollard::Docker;
 use dashmap::DashMap;
-use tokio::sync::broadcast;
+use fork_stream::{Forked, StreamExt};
+use futures::{Future, FutureExt, Stream};
+use tokio::sync::{broadcast, watch};
+use tokio_util::sync::ReusableBoxFuture;
+
+use crate::server::docker::container::ManagedContainerShared;
 
 use super::container::ManagedContainer;
 
@@ -13,9 +18,8 @@ pub struct DockerState {
     pub config: DockerConfig,
     pub docker: Docker,
     /// Map of managed container IDs to their config and state
-    pub containers: DashMap<String, Arc<ManagedContainer>>,
-    /// Notifier channel used to send status update notifications per container
-    pub notifier: broadcast::Sender<Arc<ManagedContainer>>,
+    pub containers: HashMap<String, Arc<ManagedContainer>>,
+    pub status_stream: StatusStream,
 }
 
 /// Configuration for the local Docker container management service
@@ -42,6 +46,9 @@ pub enum DockerConnectionType {
     #[serde(rename = "local")]
     Local,
 }
+
+
+pub type StatusStream = Forked<futures::stream::SelectAll<ContainerStatusStreamer>>;
 
 impl DockerState {
     /// Default timeout to use for Docker API when no alternative is specified in the config
@@ -70,8 +77,7 @@ impl DockerState {
             }
         }?;
 
-        let containers = DashMap::new();
-        let (notifier, _) = broadcast::channel(16);
+        let mut containers = HashMap::new();
         
         let dir = config.containerdir.clone();
         let container_entries = std::fs::read_dir(&dir)
@@ -92,7 +98,7 @@ impl DockerState {
 
             let container = match entry.file_type() {
                 Ok(fty) if fty.is_dir() => {
-                    ManagedContainer::load_from_dir(entry.path(), &docker, notifier.clone()).await
+                    ManagedContainer::load_from_dir(entry.path(), &docker).await
                 },
                 Ok(_) => {
                     tracing::warn!(
@@ -113,7 +119,7 @@ impl DockerState {
 
             match container {
                 Ok(c) => {
-                    let name = c.container_name().to_owned();
+                    let name = c.managed_id().to_owned();
                     if containers.insert(name.clone(), Arc::new(c)).is_some() {
                         return Err(DockerInitError::DuplicateConfiguration(name));
                     }
@@ -132,12 +138,24 @@ impl DockerState {
             tracing::warn!("Deimos server starting with no docker containers configured");
         }
 
+        let streams = containers
+            .values()
+            .cloned()
+            .map(ContainerStatusStreamer::new);
+
+        let status_stream = futures::stream::select_all(streams).fork();
+
         Ok(Self {
             config,
             docker,
             containers,
-            notifier,
+            status_stream
         })
+    }
+
+    /// Get a stream that yields containers that have updated their state
+    pub fn subscribe_state_stream(&self) -> StatusStream {
+        self.status_stream.clone()
     }
 }
 
@@ -153,4 +171,33 @@ pub enum DockerInitError {
     },
     #[error("Duplicate configurations detected for docker container with name {0}")]
     DuplicateConfiguration(String),
+}
+
+pub struct ContainerStatusStreamer {
+    container: Arc<ManagedContainer>,
+    future: ReusableBoxFuture<'static, watch::Receiver<Option<ManagedContainerShared>>>
+}
+
+impl ContainerStatusStreamer {
+    pub fn new(container: Arc<ManagedContainer>) -> Self {
+        Self {
+            future: ReusableBoxFuture::new(Self::make_future(container.rx.clone())),
+            container,
+        }
+    }
+
+    async fn make_future(mut recv: watch::Receiver<Option<ManagedContainerShared>>) -> watch::Receiver<Option<ManagedContainerShared>> {
+        let _ = recv.changed().await;
+        recv
+    }
+}
+
+impl Stream for ContainerStatusStreamer {
+    type Item = Arc<ManagedContainer>;
+
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        let rx = futures::ready!(self.future.poll(cx));
+        self.future.set(Self::make_future(rx));
+        std::task::Poll::Ready(Some(self.container.clone()))
+    }
 }
