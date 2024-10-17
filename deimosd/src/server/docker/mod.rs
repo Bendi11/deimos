@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use bollard::{container::{RemoveContainerOptions, StartContainerOptions, StopContainerOptions}, secret::EventMessage, system::EventsOptions};
-use container::{ManagedContainer, ManagedContainerError, ManagedContainerRunning, ManagedContainerState};
+use container::{ManagedContainer, ManagedContainerError, ManagedContainerRunning, ManagedContainerShared, ManagedContainerTransaction};
 use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
@@ -14,15 +14,15 @@ pub use state::{DockerState, DockerInitError};
 
 impl Deimos {
     /// Create a Docker container if it does not exist and start the given managed container
-    pub async fn start(self: Arc<Self>, managed: Arc<ManagedContainer>, state: &mut Option<ManagedContainerState>) -> Result<Arc<str>, ManagedContainerError> {
-        let docker_id = match state {
-            Some(ref mut state) => match state.running {
+    pub async fn start(self: Arc<Self>, tx: &mut ManagedContainerTransaction<'_>) -> Result<Arc<str>, ManagedContainerError> {
+        let docker_id = match tx.state() {
+            Some(ref state) => match state.running {
                 ManagedContainerRunning::Dead | ManagedContainerRunning::Paused => state.docker_id.clone(),
                 ManagedContainerRunning::Running => {
                     return Ok(state.docker_id.clone())
                 }
             },
-            None => self.clone().create_container(managed.clone(), state).await?,
+            None => self.clone().create_container(tx).await?,
         };
 
         self
@@ -30,14 +30,15 @@ impl Deimos {
             .docker
             .start_container(&docker_id, Option::<StartContainerOptions<String>>::None).await?;
 
-        tracing::trace!("Starting container {} for '{}'", docker_id, managed.container_name());
+        tracing::trace!("Starting container {} for '{}'", docker_id, tx.container().container_name());
 
         Ok(docker_id)
     }
 
     /// Create a container from the configuration loaded for the given managed container
-    pub async fn create_container(self: Arc<Self>, managed: Arc<ManagedContainer>, state: &mut Option<ManagedContainerState>) -> Result<Arc<str>, ManagedContainerError> {
-        if let Some(ref state) = state {
+    pub async fn create_container(self: Arc<Self>, tx: &mut ManagedContainerTransaction<'_>) -> Result<Arc<str>, ManagedContainerError> {
+        let managed = tx.container();
+        if let Some(ref state) = tx.state() {
             return Ok(state.docker_id.clone())
         }
 
@@ -81,15 +82,17 @@ impl Deimos {
             .clone()
             .subscribe_container_events(subscription, managed.clone(), docker_id.clone());
 
+        let listener = Arc::new(listener);
+
         tracing::trace!("Subscribed to events for container '{}': {}", managed.container_name(), docker_id);
 
-        *state = Some(
-            ManagedContainerState {
+        tx.update(Some(
+            ManagedContainerShared {
                 docker_id: docker_id.clone(),
                 running: ManagedContainerRunning::Dead,
                 listener,
             }
-        );
+        ));
 
         Ok(docker_id)
     }
@@ -117,62 +120,52 @@ impl Deimos {
     /// a notification of state change
     async fn handle_container_event(self: Arc<Self>, id: Arc<str>, managed: Arc<ManagedContainer>, event: EventMessage) {
         let Some(action) = event.action else { return };
-        let mut lock = managed.state.lock().await;
-        let Some(ref mut state) = *lock else {
-            tracing::trace!("Received event for deleted container {}", managed.container_name());
-            return
-        };
-
+        let tx = managed.transaction().await;
 
         tracing::trace!("Container {} for {} got event '{}'", id, managed.container_name(), action.as_str());
-
-        let updated = match action.as_str() {
-            "oom" => {
-                tracing::error!("Container {} out of memory received - destroying container", state.docker_id);
-                state.running = ManagedContainerRunning::Dead;
-                true
-            },
-            "destroy" => {
-                *lock = None;
-                true
-            },
-            "die" => {
-                true
-            },
-            "kill" => {
-                false
-            },
-            "paused" => {
-                state.running = ManagedContainerRunning::Paused;
-                true
-            },
-            "unpause" => {
-                state.running = ManagedContainerRunning::Running;
-                true
+        
+        let set_running = |running| move |state: &mut Option<ManagedContainerShared>| {
+            if let Some(ref mut state) = state {
+                state.running = running;
             }
-            "start" => {
-                state.running = ManagedContainerRunning::Running;
-                true
-            },
-            "stop" => {
-                state.running = ManagedContainerRunning::Dead;
-                true
-            }
-            _ => false
         };
 
-        if updated {
-            self.notify_status(managed.container_name(), &lock).await;
-        }
+        match action.as_str() {
+            "oom" => {
+                tracing::error!("Container {} out of memory received - destroying container", id);
+                tx.update(None);
+            },
+            "destroy" => {
+                tx.update(None);
+            },
+            "die" => {
+            },
+            "kill" => {
+            },
+            "paused" => {
+                tx.modify(set_running(ManagedContainerRunning::Paused));
+            },
+            "unpause" => {
+                tx.modify(set_running(ManagedContainerRunning::Running));
+            }
+            "start" => {
+                tx.modify(set_running(ManagedContainerRunning::Running));
+            },
+            "stop" => {
+                tx.modify(set_running(ManagedContainerRunning::Running));
+            }
+            _ => ()
+        };
     }
     
     /// Stop and remove the Docker container for the given managed container, and remove event
     /// listeners for the container
-    pub async fn destroy(self: Arc<Self>, managed: Arc<ManagedContainer>, lock: &mut Option<ManagedContainerState>) -> Result<(), ManagedContainerError> {
-        let Some(ref mut state) = lock else { return Ok(()) };
+    pub async fn destroy(self: Arc<Self>, tx: &mut ManagedContainerTransaction<'_>) -> Result<(), ManagedContainerError> {
+        let Some(state) = tx.state() else { return Ok(()) };
 
         let handle = state.listener.abort_handle();
         let id = state.docker_id.clone();
+        
 
         tracing::trace!("Waiting on container '{}' to stop", id);
         self.docker.docker.stop_container(&id, Some(StopContainerOptions { t: 60 * 3 })).await?;
@@ -185,13 +178,12 @@ impl Deimos {
             })
         ).await?;
 
-        tracing::info!("Stopped and removed container {} for {}", id, managed.container_name());
+        tracing::info!("Stopped and removed container {} for {}", id, tx.container().container_name());
          
         handle.abort();
-        *lock = None;
-        self.notify_status(managed.container_name(), lock).await;
+        tx.update(None);
 
-        tracing::trace!("Aborted event listener for {}", managed.container_name());
+        tracing::trace!("Aborted event listener for {}", tx.container().container_name());
 
         Ok(())
     }
@@ -217,12 +209,10 @@ impl Deimos {
             .map(
                 |container| {
                     let this = self.clone();
-                    tokio::task::spawn(
-                        async move {
-                            let mut state = container.state.lock().await;
-                            this.destroy(container.clone(), &mut state).await
-                        }
-                    )
+                    tokio::task::spawn(async move {
+                        let mut tx = container.transaction().await;
+                        this.destroy(&mut tx);
+                    })
                 }
             );
 

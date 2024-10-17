@@ -34,7 +34,7 @@ impl Deimos {
             .await
             .map_err(ServerInitError::Docker)?;
 
-        let api = ApiState::new(&upnp, config.api).await?;
+        let api = ApiState::new(&upnp, config.api, docker.notifier.subscribe()).await?;
 
         Ok(
             Arc::new(Self {

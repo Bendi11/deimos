@@ -9,6 +9,7 @@ license = "none"
 deimosproto = { path = "../deimosproto", features = ["server"] }
 tonic = { workspace = true, features = ["server"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "macros", "signal"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = "0.7"
 thiserror = "1.0"
 futures = "0.3"

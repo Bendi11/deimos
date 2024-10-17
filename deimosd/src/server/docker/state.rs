@@ -2,6 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use bollard::Docker;
 use dashmap::DashMap;
+use tokio::sync::broadcast;
 
 use super::container::ManagedContainer;
 
@@ -13,8 +14,9 @@ pub struct DockerState {
     pub docker: Docker,
     /// Map of managed container IDs to their config and state
     pub containers: DashMap<String, Arc<ManagedContainer>>,
+    /// Notifier channel used to send status update notifications per container
+    pub notifier: broadcast::Sender<Arc<ManagedContainer>>,
 }
-
 
 /// Configuration for the local Docker container management service
 #[derive(Debug, serde::Deserialize)]
@@ -69,6 +71,7 @@ impl DockerState {
         }?;
 
         let containers = DashMap::new();
+        let (notifier, _) = broadcast::channel(16);
         
         let dir = config.containerdir.clone();
         let container_entries = std::fs::read_dir(&dir)
@@ -89,7 +92,7 @@ impl DockerState {
 
             let container = match entry.file_type() {
                 Ok(fty) if fty.is_dir() => {
-                    ManagedContainer::load_from_dir(entry.path(), &docker).await
+                    ManagedContainer::load_from_dir(entry.path(), &docker, notifier.clone()).await
                 },
                 Ok(_) => {
                     tracing::warn!(
@@ -133,6 +136,7 @@ impl DockerState {
             config,
             docker,
             containers,
+            notifier,
         })
     }
 }

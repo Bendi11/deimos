@@ -1,27 +1,30 @@
 use std::{net::SocketAddr, path::PathBuf, pin::Pin, sync::Arc, task::Poll, time::Duration};
 
+use futures::StreamExt;
 use futures::{future::BoxFuture, Future, FutureExt, Stream};
 use igd_next::PortMappingProtocol;
 use tokio::sync::{broadcast, Mutex};
 use async_trait::async_trait;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use tonic::transport::Identity;
 use zeroize::Zeroize;
 
-use super::docker::container::{ManagedContainer, ManagedContainerRunning, ManagedContainerState};
+use super::docker::container::{ManagedContainer, ManagedContainerRunning, ManagedContainerShared};
 use super::upnp::{Upnp, UpnpLease};
 use super::Deimos;
 
-use deimosproto as proto;
+use deimosproto::{self as proto, ContainerStatusNotification};
 
 /// A connection to a remote client, with references to state required to serve RPC requests
 pub struct ApiState {
     pub config: ApiConfig,
     /// Address leased for the API
     pub lease: Option<UpnpLease>,
-    /// Status notification sender for gRPC subscribers
-    pub sender: tokio::sync::broadcast::Sender<deimosproto::ContainerStatusNotification>,
+    /// Status notification receiver, to be rebroadcasted to gRPC subscribers
+    pub recv: broadcast::Receiver<Arc<ManagedContainer>>,
 }
 
 /// Configuration used to initialize and inform the Deimos API service
@@ -41,7 +44,7 @@ pub struct ApiConfig {
 impl ApiState {
     /// Load the Deimos API service configuration and store a handle to the local Docker instance
     /// to manage containers
-    pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
+    pub async fn new(upnp: &Upnp, config: ApiConfig, recv: broadcast::Receiver<Arc<ManagedContainer>>) -> Result<Self, ApiInitError> {
         let lease = match config.upnp {
             true => Some(
                     upnp.lease(
@@ -52,21 +55,14 @@ impl ApiState {
         };
 
 
-        let (sender, _) = tokio::sync::broadcast::channel(2);
-
         Ok(
             Self {
                 config,
                 lease,
-                sender,
+                recv,
             }
         )
     }
-}
-
-pub struct ContainerStatusStreamer {
-    channel: Arc<Mutex<broadcast::Receiver<proto::ContainerStatusNotification>>>,
-    state: Pin<Box<dyn Future<Output = Option<proto::ContainerStatusNotification>> + 'static + Send>>,
 }
 
 impl Deimos {
@@ -118,16 +114,7 @@ impl Deimos {
         Ok(())
     }
 
-    /// Notify gRPC subscribers of the given managed container state
-    pub async fn notify_status(&self, container_id: &str, state: &Option<ManagedContainerState>) {
-        tracing::trace!("Notifying subscribers of status change for {}", container_id);
-        let up_state = Self::container_api_run_status(state);
-        if let Err(e) = self.api.sender.send(deimosproto::ContainerStatusNotification { container_id: container_id.to_owned(), up_state: up_state as i32 }) {
-            tracing::trace!("Failed to send container update notification to channel: {}", e);
-        }
-    }
-
-    fn container_api_run_status(state: &Option<ManagedContainerState>) -> deimosproto::ContainerUpState {
+    fn container_api_run_status(state: &Option<ManagedContainerShared>) -> deimosproto::ContainerUpState {
         state.as_ref().map(|s| proto::ContainerUpState::from(s.running)).unwrap_or(proto::ContainerUpState::Dead)
     }
 }
@@ -142,6 +129,7 @@ impl From<ManagedContainerRunning> for proto::ContainerUpState {
     }
 }
 
+pub struct ContainerStatusBroadcastMap;
 
 #[async_trait]
 impl proto::DeimosService for Deimos {
@@ -153,7 +141,7 @@ impl proto::DeimosService for Deimos {
                 proto::ContainerBrief {
                     id: c.config.id.to_string(),
                     title: c.config.name.to_string(),
-                    up_state: Self::container_api_run_status(&*c.state.lock().await) as i32,
+                    up_state: Self::container_api_run_status(&c.state()) as i32,
                 }
             )
         }
@@ -174,14 +162,31 @@ impl proto::DeimosService for Deimos {
         )
     }
 
-    type ContainerStatusStreamStream = ContainerStatusStreamer;
+    type ContainerStatusStreamStream = futures::stream::Map<
+        BroadcastStream<Arc<ManagedContainer>>,
+        Box<dyn
+            FnMut(Result<Arc<ManagedContainer>, BroadcastStreamRecvError>) -> Result<proto::ContainerStatusNotification, tonic::Status>
+            + Send + Sync
+        >
+    >;
 
-    async fn container_status_stream(self: Arc<Self>, _: tonic::Request<proto::ContainerStatusStreamRequest>) -> Result<tonic::Response<ContainerStatusStreamer>, tonic::Status> {
-        let rx = self.api.sender.subscribe();
-
+    async fn container_status_stream(self: Arc<Self>, _: tonic::Request<proto::ContainerStatusStreamRequest>) -> Result<tonic::Response<Self::ContainerStatusStreamStream>, tonic::Status> {
         Ok(
             tonic::Response::new(
-                ContainerStatusStreamer::new(rx)
+                BroadcastStream::new(self.api.recv.resubscribe())
+                    .map(
+                        Box::new(
+                            |result: Result<Arc<ManagedContainer>, BroadcastStreamRecvError>|
+                                result
+                                    .map(|container|
+                                        proto::ContainerStatusNotification {
+                                            container_id: container.container_name().to_owned(),
+                                            up_state: Self::container_api_run_status(&container.state()) as i32,
+                                        }  
+                                    )
+                                    .map_err(|_| tonic::Status::internal("Status stream lagged"))
+                        )
+                    )
             )
         )
     }
@@ -195,8 +200,8 @@ impl proto::DeimosService for Deimos {
                     proto::ContainerUpState::Running => {
                         tokio::task::spawn(
                             async move {
-                                let mut state = c.state.lock().await;
-                                if let Err(e) = self.start(c.clone(), &mut state).await {
+                                let mut ts = c.transaction().await;
+                                if let Err(e) = self.start(&mut ts).await {
                                     tracing::error!("Failed to start server in response to gRPC request: {e}");
                                 }
                             }
@@ -205,8 +210,8 @@ impl proto::DeimosService for Deimos {
                     proto::ContainerUpState::Dead => {
                         tokio::task::spawn(
                             async move {
-                                let mut state = c.state.lock().await;
-                                if let Err(e) = self.destroy(c.clone(), &mut state).await {
+                                let mut ts = c.transaction().await;
+                                if let Err(e) = self.destroy(&mut ts).await {
                                     tracing::error!("Failed to destroy server in response to gRPC request: {e}");
                                 }
                             }
@@ -227,44 +232,6 @@ impl proto::DeimosService for Deimos {
         }
     }
 }
-
-impl Stream for ContainerStatusStreamer {
-    type Item = Result<proto::ContainerStatusNotification, tonic::Status>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.state.as_mut().poll(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(val) => {
-                self.state = Self::future(self.channel.clone());
-                Poll::Ready(Some(val.ok_or_else(|| tonic::Status::internal("Failed to receive container notification"))))
-            }
-        }
-    }
-}
-
-impl ContainerStatusStreamer {
-    pub fn new(channel: broadcast::Receiver<proto::ContainerStatusNotification>) -> Self {
-        let channel = Arc::new(Mutex::new(channel));
-        let state = Self::future(channel.clone());
-
-        Self {
-            channel,
-            state,
-        }
-    }
-
-    fn future(channel: Arc<Mutex<broadcast::Receiver<proto::ContainerStatusNotification>>>) -> BoxFuture<'static, Option<proto::ContainerStatusNotification>> {
-        Box::pin(async move {
-            channel
-                .lock()
-                .await
-                .recv()
-                .map(Result::ok)
-                .await
-        })
-    }
-}
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiInitError {

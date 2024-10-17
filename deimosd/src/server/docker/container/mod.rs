@@ -3,32 +3,48 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::SystemTime};
 use bollard::Docker;
 use chrono::{DateTime, Utc};
 use config::ManagedContainerConfig;
-use tokio::{io::AsyncReadExt, sync::Mutex};
+use tokio::{io::AsyncReadExt, sync::{broadcast, watch, Mutex}};
 
 
 pub mod config;
 
 /// A managed container that represents a running or stopped container
+/// Maintains several invariants of the Docker container manager.
+/// - One mutating Docker request may take place at a time per container
+/// - All mutations to the shared state (incl. those due to external events like OOM killer)
+/// must be propogated to the gRPC server
+/// - Immutable accesses to container data should access the most recent shared state without
+/// blocking, regardless of if the state is currently being mutated by another task
 pub struct ManagedContainer {
     /// Configuration provided in a directory for this container
     pub config: ManagedContainerConfig,
     /// Directory that the container's config file was loaded from, used to build relative paths
     /// specified in the config
     dir: PathBuf,
-    /// Date and time of the last modification made to the config file
-    pub last_modified: DateTime<Utc>,
-    /// State of the container
-    pub state: Mutex<Option<ManagedContainerState>>,
+    /// Broadcast channel used to notify the gRPC server of state changes in the container
+    api_notify: tokio::sync::broadcast::Sender<Arc<ManagedContainer>>,
+    /// Mutex here to allow only one mutating Docker request at a time
+    tx: Mutex<watch::Sender<Option<ManagedContainerShared>>>,
+    /// Receiver used to access the most recent instance of shared state without blocking
+    rx: watch::Receiver<Option<ManagedContainerShared>>,
+}
+
+/// A guard allowing mutation of the given container's shared state, representing a single
+/// transaction with the Docker server.
+pub struct ManagedContainerTransaction<'a> {
+    container: &'a Arc<ManagedContainer>,
+    tx: tokio::sync::MutexGuard<'a, watch::Sender<Option<ManagedContainerShared>>>,
 }
 
 /// State populated after a Docker container is created for a [ManagedContainer]
-pub struct ManagedContainerState {
+#[derive(Clone)]
+pub struct ManagedContainerShared {
     /// ID of the container running for this
     pub docker_id: Arc<str>,
     /// Status of the container in Docker
     pub running: ManagedContainerRunning,
     /// Task listening for events propogated by the docker container
-    pub listener: tokio::task::JoinHandle<()>,
+    pub listener: Arc<tokio::task::JoinHandle<()>>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,21 +54,49 @@ pub enum ManagedContainerRunning {
     Running
 }
 
-pub struct ManagedContainerStateGuard<'a> {
-    lock: tokio::sync::MappedMutexGuard<'a, ManagedContainerState>,
+impl<'a> ManagedContainerTransaction<'a> {
+    /// Update the container's state according to operations performed in a transaction
+    pub async fn update(&self, state: Option<ManagedContainerShared>) {
+        self.tx.send_replace(state);
+    }
+    
+    /// Modify the current state with the provided function
+    pub async fn modify<F: FnOnce(&mut Option<ManagedContainerShared>)>(&self, fun: F) {
+        self.tx.send_modify(fun)
+    }
+    
+    /// Get the current state, to be modified and re-written
+    pub fn state(&self) -> Option<ManagedContainerShared> {
+        self.container.rx.borrow().clone()
+    }
+    
+    /// Get the container that this transaction modifies
+    pub fn container(&self) -> &Arc<ManagedContainer> {
+        self.container
+    }
+}
+
+impl<'a> AsRef<Arc<ManagedContainer>> for ManagedContainerTransaction<'a> {
+    fn as_ref(&self) -> &Arc<ManagedContainer> {
+        self.container
+    }
 }
 
 impl ManagedContainer {
     const CONFIG_FILENAME: &str = "container.toml";
     
-    pub async fn state(&self) -> Option<tokio::sync::MappedMutexGuard<'_, ManagedContainerState>> {
-        tokio::sync::MutexGuard::try_map(
-            self
-                .state
-                .lock()
-                .await,
-            |lock| lock.as_mut()
-        ).ok()
+    /// Wait for all other transactions for this container to complete, then begin a new
+    /// transaction allowing state changes
+    pub async fn transaction(self: &Arc<Self>) -> ManagedContainerTransaction {
+        ManagedContainerTransaction {
+            container: self,
+            tx: self.tx.lock().await,
+        }
+    }
+    
+    /// Get a reference to the most recent shared state without blocking
+    pub fn state(&self) -> watch::Ref<'_, Option<ManagedContainerShared>> {
+        self.rx.borrow()
     }
 
     /// Load a new managed container from the given configuration file, ensuring that the image
@@ -60,6 +104,7 @@ impl ManagedContainer {
     pub(super) async fn load_from_dir(
         dir: PathBuf,
         docker: &Docker,
+        api_notify: broadcast::Sender<Arc<Self>>,
     ) -> Result<Self, ManagedContainerLoadError> {
         let config_path = dir.join(Self::CONFIG_FILENAME);
         tracing::trace!(
@@ -72,11 +117,6 @@ impl ManagedContainer {
         let mut config_file = tokio::fs::File::open(&config_path)
             .await
             .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err})?;
-
-        let metadata = config_file
-            .metadata()
-            .await
-            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path.clone(), err })?;
     
         let mut config_str = String::with_capacity(config_file.metadata().await.map(|m| m.len()).unwrap_or(512) as usize);
         config_file
@@ -86,17 +126,6 @@ impl ManagedContainer {
 
         let config = toml::de::from_str::<ManagedContainerConfig>(&config_str)?;
         tracing::trace!("Found docker container with container name {}", config.name);
-        
-        let last_modified = metadata
-            .modified()
-            .map_err(|err| ManagedContainerLoadError::ConfigFileIO { path: config_path, err })?;
-
-        let last_modified = last_modified
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(ManagedContainerLoadError::InvalidDateTime)?;
-
-        let last_modified = DateTime::from_timestamp(last_modified.as_secs() as i64, last_modified.subsec_nanos())
-            .expect("Last modified timestamp out of range?");
 
         let image_inspect = docker.inspect_image(&config.docker.image).await?;
         match image_inspect.id {
@@ -107,12 +136,16 @@ impl ManagedContainer {
                     id,
                 );
 
+                let (tx, rx) = watch::channel(None);
+                let tx = Mutex::new(tx);
+
                 Ok(
                     Self {
                         dir,
                         config,
-                        last_modified,
-                        state: Mutex::new(None),
+                        tx,
+                        rx,
+                        api_notify,
                     }
                 )
             }
@@ -180,17 +213,6 @@ impl ManagedContainer {
             ..Default::default()
         }
     }
-    
-    /// Get the ID of the Docker container that has been created for this managed container, or
-    /// `None` if no container exists
-    pub async fn container_id(&self) -> Option<Arc<str>> {
-        self
-            .state
-            .lock()
-            .await
-            .as_ref()
-            .map(|s| s.docker_id.clone())
-    }
 
     /// Get the name of the Docker container when run
     pub fn container_name(&self) -> &str {
@@ -219,4 +241,12 @@ pub enum ManagedContainerLoadError {
     Bollard(#[from] bollard::errors::Error),
     #[error("Container config references nonexistent Docker image '{0}'. Try ensuring that you have pulled the image from a Docker registry")]
     MissingImage(String),
+}
+
+impl Drop for ManagedContainerTransaction<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = self.container.api_notify.send(self.container.clone()) {
+            tracing::error!("Failed to send container transaction update to channel: {e}");
+        }
+    }
 }
