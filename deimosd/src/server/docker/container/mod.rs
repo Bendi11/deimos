@@ -56,12 +56,12 @@ pub enum ManagedContainerRunning {
 
 impl<'a> ManagedContainerTransaction<'a> {
     /// Update the container's state according to operations performed in a transaction
-    pub async fn update(&self, state: Option<ManagedContainerShared>) {
+    pub fn update(&self, state: Option<ManagedContainerShared>) {
         self.tx.send_replace(state);
     }
     
     /// Modify the current state with the provided function
-    pub async fn modify<F: FnOnce(&mut Option<ManagedContainerShared>)>(&self, fun: F) {
+    pub fn modify<F: FnOnce(&mut Option<ManagedContainerShared>)>(&self, fun: F) {
         self.tx.send_modify(fun)
     }
     

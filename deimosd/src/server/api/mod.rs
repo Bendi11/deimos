@@ -129,8 +129,6 @@ impl From<ManagedContainerRunning> for proto::ContainerUpState {
     }
 }
 
-pub struct ContainerStatusBroadcastMap;
-
 #[async_trait]
 impl proto::DeimosService for Deimos {
     async fn query_containers(self: Arc<Self>, _request: tonic::Request<proto::QueryContainersRequest>) -> Result<tonic::Response<proto::QueryContainersResponse>, tonic::Status> {
