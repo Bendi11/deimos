@@ -10,10 +10,10 @@ use zeroize::Zeroize;
 
 use super::docker::container::{ManagedContainer, ManagedContainerRunning, ManagedContainerShared};
 use super::docker::state::StatusStream;
-use super::upnp::{Upnp, UpnpLease};
+use super::upnp::{Upnp, UpnpLease, UpnpLeaseData};
 use super::Deimos;
 
-use deimosproto::{self as proto, ContainerStatusNotification};
+use deimosproto as proto;
 
 /// State required exclusively for the gRPC server including UPnP port leases.
 pub struct ApiState {
@@ -41,67 +41,58 @@ impl ApiState {
     /// to manage containers
     pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
         let lease = match config.upnp {
-            true => Some(
-                upnp.lease(std::iter::once((
-                    config.bind.port(),
-                    PortMappingProtocol::TCP,
-                )))
-                .await,
-            ),
+            true => match upnp.request(
+                std::iter::once(UpnpLeaseData {
+                    port: config.bind.port(),
+                    protocol: PortMappingProtocol::TCP,
+                    name: "Deimos gRPC server".to_owned()
+                    })
+                )
+                .await {
+                Ok(lease) => Some(lease),
+                Err(e) => {
+                    tracing::error!("Failed to get UPnP lease for gRPC server: {e}");
+                    None
+                }
+            },
             false => None,
         };
 
         Ok(Self { config, lease })
     }
+
+    async fn init_server(config: &ApiConfig) -> Result<Server, ApiInitError> {
+        let server = Server::builder()
+            .timeout(config.timeout);
+        Ok(server)
+    }
 }
 
 impl Deimos {
+
+
     /// Load all specified certificates from the paths specified in the config and attempt to run
     /// the server to completion.
     /// This method should not return until the [CancellationToken] has been cancelled.
-    pub async fn serve_api(self: Arc<Self>, cancel: CancellationToken) -> Result<(), ApiInitError> {
-        /*let mut ca_cert_pem = util::load_check_permissions(&self.api.config.certificate)
-            .await
-            .map_err(|e| ApiInitError::LoadSensitiveFile(self.api.config.certificate.clone(), e))?;
-
-        let mut privkey_pem = util::load_check_permissions(&self.api.config.privkey)
-            .await
-            .map_err(|e| ApiInitError::LoadSensitiveFile(self.api.config.privkey.clone(), e))?;
-
-        let mut client_ca_root_pem = util::load_check_permissions(&self.api.config.client_ca_root)
-            .await
-            .map_err(|e| ApiInitError::LoadSensitiveFile(self.api.config.client_ca_root.clone(), e))?;*/
-
-        let server = Server::builder()
-            .timeout(self.api.config.timeout)
-            /*.tls_config(
-                ServerTlsConfig::new()
-                    .client_auth_optional(true)
-                    .identity(Identity::from_pem(&ca_cert_pem, &privkey_pem))
-                    .client_ca_root(Certificate::from_pem(&client_ca_root_pem))
-            )*/;
-
-        /*ca_cert_pem.zeroize();
-        privkey_pem.zeroize();
-        client_ca_root_pem.zeroize();*/
-
-        match Ok(server) {
-            Ok(mut server) => {
-                let result = server
-                    .add_service(proto::DeimosServiceServer::from_arc(self.clone()))
-                    .serve_with_shutdown(self.api.config.bind, cancel.cancelled());
-
-                tokio::select! {
-                    _ = cancel.cancelled() => {},
-                    result = result => if let Err(e) = result {
-                        tracing::error!("gRPC server error: {e}");
-                    }
-                }
+    pub async fn api_task(self: Arc<Self>, cancel: CancellationToken) {
+        let mut server = match ApiState::init_server(&self.api.config).await {
+            Ok(server) => server,
+            Err(e) => {
+                tracing::error!("Failed to initialize gRPC server: {e}");
+                return
             }
-            Err(e) => return Err(ApiInitError::TlsConfig(e)),
-        }
+        };
 
-        Ok(())
+        let result = server
+            .add_service(proto::DeimosServiceServer::from_arc(self.clone()))
+            .serve_with_shutdown(self.api.config.bind, cancel.cancelled());
+
+        tokio::select! {
+            _ = cancel.cancelled() => {},
+            result = result => if let Err(e) = result {
+                tracing::error!("gRPC server error: {e}");
+            }
+        }
     }
 
     /// Translate the current state of a managed container to an enum that can be serialized to

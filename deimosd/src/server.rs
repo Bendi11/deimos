@@ -29,7 +29,6 @@ impl Deimos {
     /// and creating a TCP listener for the control interface.
     pub async fn new(config: DeimosConfig) -> Result<Arc<Self>, ServerInitError> {
         let upnp = Upnp::new().await?;
-
         let docker = DockerState::new(config.docker)
             .await
             .map_err(ServerInitError::Docker)?;
@@ -43,14 +42,9 @@ impl Deimos {
     pub async fn run(self: Arc<Self>) -> ExitCode {
         let cancel = CancellationToken::new();
 
-        let cancel_copy = cancel.clone();
-        let this = self.clone();
         let docker = tokio::task::spawn(self.clone().docker_task(cancel.clone()));
-        let api_server = tokio::task::spawn(async move {
-            if let Err(e) = this.serve_api(cancel_copy).await {
-                tracing::error!("Failed to serve gRPC API: {e}");
-            }
-        });
+        let api_server = tokio::task::spawn(self.clone().api_task(cancel.clone()));
+        let upnp = tokio::task::spawn(self.clone().upnp_task(cancel.clone()));
 
         #[cfg(unix)]
         {
@@ -84,7 +78,8 @@ impl Deimos {
 
         let _ = tokio::join! {
             docker,
-            api_server
+            api_server,
+            upnp,
         };
 
         ExitCode::SUCCESS

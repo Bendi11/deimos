@@ -169,12 +169,15 @@ pub enum DockerInitError {
     DuplicateConfiguration(DeimosId),
 }
 
+/// A structure implementing [Stream] that will send a reference to the container whenever its
+/// state is mutated.
 pub struct ContainerStatusStreamer {
     container: Arc<ManagedContainer>,
     future: ReusableBoxFuture<'static, watch::Receiver<Option<ManagedContainerShared>>>,
 }
 
 impl ContainerStatusStreamer {
+    /// Create a new streamer that produces output whenever the given container is mutated
     pub fn new(container: Arc<ManagedContainer>) -> Self {
         Self {
             future: ReusableBoxFuture::new(Self::make_future(container.rx.clone())),
