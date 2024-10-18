@@ -8,7 +8,7 @@ use tonic::transport::Identity;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use zeroize::Zeroize;
 
-use super::docker::container::{ManagedContainer, ManagedContainerRunning, ManagedContainerShared};
+use super::docker::container::{ManagedContainer, ManagedContainerDirective, ManagedContainerShared};
 use super::docker::state::StatusStream;
 use super::upnp::{Upnp, UpnpLease, UpnpLeaseData};
 use super::Deimos;
@@ -69,8 +69,6 @@ impl ApiState {
 }
 
 impl Deimos {
-
-
     /// Load all specified certificates from the paths specified in the config and attempt to run
     /// the server to completion.
     /// This method should not return until the [CancellationToken] has been cancelled.
@@ -102,17 +100,17 @@ impl Deimos {
     ) -> deimosproto::ContainerUpState {
         state
             .as_ref()
-            .map(|s| proto::ContainerUpState::from(s.running))
+            .map(|s| proto::ContainerUpState::from(s.directive))
             .unwrap_or(proto::ContainerUpState::Dead)
     }
 }
 
-impl From<ManagedContainerRunning> for proto::ContainerUpState {
-    fn from(value: ManagedContainerRunning) -> proto::ContainerUpState {
+impl From<ManagedContainerDirective> for proto::ContainerUpState {
+    fn from(value: ManagedContainerDirective) -> proto::ContainerUpState {
         match value {
-            ManagedContainerRunning::Dead => proto::ContainerUpState::Dead,
-            ManagedContainerRunning::Paused => proto::ContainerUpState::Paused,
-            ManagedContainerRunning::Running => proto::ContainerUpState::Running,
+            ManagedContainerDirective::Stop => proto::ContainerUpState::Dead,
+            ManagedContainerDirective::Pause => proto::ContainerUpState::Paused,
+            ManagedContainerDirective::Run => proto::ContainerUpState::Running,
         }
     }
 }

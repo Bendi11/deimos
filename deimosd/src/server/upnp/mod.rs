@@ -187,6 +187,8 @@ pub enum UpnpError {
 
 impl Drop for UpnpLease {
     fn drop(&mut self) {
-        self.leases.drop(self.ports.iter().copied())
+        if let Some(ref ports) = Arc::get_mut(&mut self.ports) {
+            self.leases.drop(ports.iter().copied())
+        }
     }
 }

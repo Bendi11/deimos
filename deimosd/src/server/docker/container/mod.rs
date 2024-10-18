@@ -28,51 +28,53 @@ pub struct ManagedContainer {
     /// specified in the config
     dir: PathBuf,
     /// Mutex here to allow only one mutating Docker request at a time
-    tx: Mutex<watch::Sender<Option<ManagedContainerShared>>>,
+    tx: Mutex<watch::Sender<ManagedContainerShared>>,
     /// Receiver used to access the most recent instance of shared state without blocking
-    pub(super) rx: watch::Receiver<Option<ManagedContainerShared>>,
+    pub(super) rx: watch::Receiver<ManagedContainerShared>,
 }
 
 /// A guard allowing mutation of the given container's shared state, representing a single
 /// transaction with the Docker server.
 pub struct ManagedContainerTransaction<'a> {
     container: &'a Arc<ManagedContainer>,
-    tx: tokio::sync::MutexGuard<'a, watch::Sender<Option<ManagedContainerShared>>>,
+    tx: tokio::sync::MutexGuard<'a, watch::Sender<ManagedContainerShared>>,
 }
 
-/// State populated after a Docker container is created for a [ManagedContainer]
+/// State that may be mutated in transactions for a given [ManagedContainer]
 #[derive(Clone)]
 pub struct ManagedContainerShared {
-    /// ID of the container running for this
-    pub docker_id: DockerId,
     /// Status of the container in Docker
-    pub running: ManagedContainerRunning,
-    /// Task listening for events propogated by the docker container
-    pub listener: Arc<tokio::task::JoinHandle<()>>,
+    pub directive: ManagedContainerDirective,
     /// Lease for ports requested from the UPnP manager
     pub upnp_lease: UpnpLease,
 }
 
-#[derive(Clone, Copy)]
-pub enum ManagedContainerRunning {
-    Dead,
-    Paused,
-    Running,
+#[derive(Clone,)]
+pub enum ManagedContainerDirective {
+    Stop,
+    Pause,
+    Run(ManagedContainerRunDirective),
+}
+
+/// State managed for a manged container that should be running
+#[derive(Clone,)]
+pub struct ManagedContainerRunDirective {
+    pub lease: UpnpLease,
 }
 
 impl<'a> ManagedContainerTransaction<'a> {
     /// Update the container's state according to operations performed in a transaction
-    pub fn update(&self, state: Option<ManagedContainerShared>) {
+    pub fn update(&self, state: ManagedContainerShared) {
         self.tx.send_replace(state);
     }
 
     /// Modify the current state with the provided function
-    pub fn modify<F: FnOnce(&mut Option<ManagedContainerShared>)>(&self, fun: F) {
+    pub fn modify<F: FnOnce(&mut ManagedContainerShared)>(&self, fun: F) {
         self.tx.send_modify(fun)
     }
 
     /// Get the current state, to be modified and re-written
-    pub fn state(&self) -> Option<ManagedContainerShared> {
+    pub fn state(&self) -> ManagedContainerShared {
         self.container.rx.borrow().clone()
     }
 
@@ -112,17 +114,6 @@ impl ManagedContainer {
     /// Get a reference to the most recent shared state without blocking
     pub fn state(&self) -> watch::Ref<'_, Option<ManagedContainerShared>> {
         self.rx.borrow()
-    }
-
-    /// Get a new future that resolves when the shared state for this container has been mutated
-    pub async fn wait_change(&self) {
-        if let Err(e) = self.rx.clone().changed().await {
-            tracing::error!(
-                "Failed to wait on status changes for container {}: {}",
-                self.deimos_id(),
-                e
-            );
-        }
     }
 
     /// Load a new managed container from the given configuration file, ensuring that the image

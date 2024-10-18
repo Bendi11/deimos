@@ -6,7 +6,7 @@ use bollard::{
     system::EventsOptions,
 };
 use container::{
-    BollardError, DockerId, ManagedContainer, ManagedContainerError, ManagedContainerRunning,
+    BollardError, DockerId, ManagedContainer, ManagedContainerError, ManagedContainerDirective,
     ManagedContainerShared, ManagedContainerTransaction,
 };
 use futures::{Stream, StreamExt};
@@ -28,11 +28,11 @@ impl Deimos {
         tx: &mut ManagedContainerTransaction<'_>,
     ) -> Result<DockerId, ManagedContainerError> {
         let docker_id = match tx.state() {
-            Some(ref state) => match state.running {
-                ManagedContainerRunning::Dead | ManagedContainerRunning::Paused => {
+            Some(ref state) => match state.directive {
+                ManagedContainerDirective::Stop | ManagedContainerDirective::Pause => {
                     state.docker_id.clone()
                 }
-                ManagedContainerRunning::Running => return Ok(state.docker_id.clone()),
+                ManagedContainerDirective::Run => return Ok(state.docker_id.clone()),
             },
             None => self.clone().create_container(tx).await?,
         };
@@ -103,7 +103,7 @@ impl Deimos {
 
         let state = ManagedContainerShared {
             docker_id,
-            running: ManagedContainerRunning::Dead,
+            directive: ManagedContainerDirective::Stop,
             listener,
             upnp_lease,
         };
@@ -187,7 +187,7 @@ impl Deimos {
         let set_running = |running| {
             move |state: &mut Option<ManagedContainerShared>| {
                 if let Some(ref mut state) = state {
-                    state.running = running;
+                    state.directive = running;
                 }
             }
         };
@@ -204,23 +204,23 @@ impl Deimos {
             }
             "die" => {
                 tracing::warn!("Container {} unexpectedly died - destroying container", tx.container().deimos_id());
-                tx.modify(set_running(ManagedContainerRunning::Dead));
+                tx.modify(set_running(ManagedContainerDirective::Stop));
                 if let Err(e) = self.destroy(&mut tx).await {
                     tracing::error!("Failed to destroy container after unexpected die: {e}");
                 }
             },
             "kill" => {},
             "paused" => {
-                tx.modify(set_running(ManagedContainerRunning::Paused));
+                tx.modify(set_running(ManagedContainerDirective::Pause));
             },
             "unpause" => {
-                tx.modify(set_running(ManagedContainerRunning::Running));
+                tx.modify(set_running(ManagedContainerDirective::Run));
             }
             "start" => {
-                tx.modify(set_running(ManagedContainerRunning::Running));
+                tx.modify(set_running(ManagedContainerDirective::Run));
             }
             "stop" => {
-                tx.modify(set_running(ManagedContainerRunning::Running));
+                tx.modify(set_running(ManagedContainerDirective::Run));
             }
             _ => (),
         };
@@ -254,7 +254,7 @@ impl Deimos {
             }
         }
 
-        state.running = ManagedContainerRunning::Dead;
+        state.directive = ManagedContainerDirective::Stop;
         tx.update(Some(state));
 
         self.docker
