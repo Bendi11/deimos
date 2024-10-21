@@ -1,25 +1,29 @@
 use std::{path::PathBuf, sync::Arc};
 
-use super::DeimosId;
+use super::id::DeimosId;
 
-/// Configuration for a managed Docker container
+
+/// Top-level configuration for a Pod, parsed from TOML files
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ManagedContainerConfig {
+pub struct PodConfig {
     /// ID of the container, must remain constant over server renames
     pub id: DeimosId,
     /// Name that identifies this container
     pub name: Arc<str>,
     /// Configuration for the Docker container
-    pub docker: ManagedContainerDockerConfig,
+    pub docker: PodDockerConfig,
 }
 
 /// Configuration to be passed to Docker when  starting this container
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ManagedContainerDockerConfig {
+pub struct PodDockerConfig {
     /// Docker image used to create the Docker container
     pub image: String,
+    /// Time to wait in seconds before forcefully killing the container
+    #[serde(default = "PodDockerConfig::default_stop_timeout")]
+    pub stop_timeout: u32,
     /// List of volumes to mount inside the container
     #[serde(default)]
     pub volume: Vec<ManagedContainerDockerMountConfig>,
@@ -81,5 +85,12 @@ impl From<ManagedContainerDockerPortProtocol> for igd_next::PortMappingProtocol 
             ManagedContainerDockerPortProtocol::Udp => Self::UDP,
             ManagedContainerDockerPortProtocol::Tcp => Self::TCP,
         }
+    }
+}
+
+impl PodDockerConfig {
+    /// Helper function for providing a default timeout when serde does not find one specified
+    pub const fn default_stop_timeout() -> u32 {
+        60
     }
 }

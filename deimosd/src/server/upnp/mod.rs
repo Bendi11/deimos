@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use std::time::Duration;
 
+use dashmap::DashMap;
 use igd_next::aio::tokio::Tokio;
 use igd_next::aio::Gateway;
 use igd_next::PortMappingProtocol;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use super::Deimos;
@@ -21,7 +22,7 @@ pub struct Upnp {
 
 #[derive(Clone, Default)]
 struct UpnpLeases {
-    map: Arc<Mutex<HashMap<u16, UpnpLeaseData>>>
+    map: DashMap<u16, UpnpLeaseData>
 }
 
 /// Data required for UPNP lease
@@ -90,9 +91,8 @@ impl Upnp {
                 }
             };
 
-            let lock = self.leases.map.lock().await;
-            for (_, port) in lock.iter() {
-                self.accquire(&gateway, port).await;
+            for entry in self.leases.map.iter() {
+                self.accquire(&gateway, entry.value()).await;
             }
         }
     }
@@ -138,15 +138,16 @@ impl UpnpLeases {
     pub async fn add(&self, ports: impl IntoIterator<Item = UpnpLeaseData>) -> Result<UpnpLease, UpnpError> {
         let lease_data = ports.into_iter().collect::<Vec<_>>();
 
-        let mut map = self.map.lock().await;
         for data in lease_data.iter() {
-            if map.contains_key(&data.port) {
+            if self.map.contains_key(&data.port) {
                 return Err(UpnpError::InUse(data.port))
             }
         }
         
         let ports = lease_data.iter().map(|data| data.port).collect::<Arc<[_]>>(); 
-        map.extend(lease_data.into_iter().map(|data| (data.port, data)));
+        for (port, data) in lease_data.into_iter().map(|data| (data.port, data)) {
+            self.map.insert(port, data);
+        }
         
         Ok(
             UpnpLease {
@@ -160,13 +161,8 @@ impl UpnpLeases {
     /// This function can be called from both async and non-async contexts - so `Drop`
     /// implementations can use it safely.
     pub fn drop(&self, ports: impl IntoIterator<Item = u16>) {
-        let mut map = match tokio::runtime::Handle::try_current() {
-            Ok(rt) => rt.block_on(self.map.lock()),
-            Err(_) => self.map.blocking_lock()
-        };
-
         for port in ports {
-            map.remove(&port);
+            self.map.remove(&port);
         }
     }
 }

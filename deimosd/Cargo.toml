@@ -14,6 +14,7 @@ tokio-util = "0.7"
 thiserror = "1.0"
 futures = "0.3"
 async-trait = "0.1"
+dashmap = "6.0"
 
 igd-next = { version = "0.15", features = ["aio_tokio"] }
 

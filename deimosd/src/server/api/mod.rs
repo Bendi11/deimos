@@ -8,8 +8,6 @@ use tonic::transport::Identity;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use zeroize::Zeroize;
 
-use super::docker::container::{ManagedContainer, ManagedContainerDirective, ManagedContainerShared};
-use super::docker::state::StatusStream;
 use super::upnp::{Upnp, UpnpLease, UpnpLeaseData};
 use super::Deimos;
 
@@ -92,118 +90,12 @@ impl Deimos {
             }
         }
     }
-
-    /// Translate the current state of a managed container to an enum that can be serialized to
-    /// protobuf and sent to clients
-    fn container_api_run_status(
-        state: &Option<ManagedContainerShared>,
-    ) -> deimosproto::ContainerUpState {
-        state
-            .as_ref()
-            .map(|s| proto::ContainerUpState::from(s.directive))
-            .unwrap_or(proto::ContainerUpState::Dead)
-    }
 }
 
-impl From<ManagedContainerDirective> for proto::ContainerUpState {
-    fn from(value: ManagedContainerDirective) -> proto::ContainerUpState {
-        match value {
-            ManagedContainerDirective::Stop => proto::ContainerUpState::Dead,
-            ManagedContainerDirective::Pause => proto::ContainerUpState::Paused,
-            ManagedContainerDirective::Run => proto::ContainerUpState::Running,
-        }
-    }
-}
 
 #[async_trait]
 impl proto::DeimosService for Deimos {
-    async fn query_containers(
-        self: Arc<Self>,
-        _request: tonic::Request<proto::QueryContainersRequest>,
-    ) -> Result<tonic::Response<proto::QueryContainersResponse>, tonic::Status> {
-        let mut containers = Vec::new();
-        for (_, c) in self.docker.containers.iter() {
-            containers.push(proto::ContainerBrief {
-                id: c.config.id.to_string(),
-                title: c.config.name.to_string(),
-                up_state: Self::container_api_run_status(&c.state()) as i32,
-            })
-        }
-
-        Ok(tonic::Response::new(proto::QueryContainersResponse {
-            containers,
-        }))
-    }
-
-    type SubscribeContainerStatusStream = futures::stream::Map<
-        StatusStream,
-        Box<
-            dyn FnMut(
-                    Arc<ManagedContainer>,
-                ) -> Result<proto::ContainerStatusNotification, tonic::Status>
-                + Send
-                + Sync,
-        >,
-    >;
-
-    async fn subscribe_container_status(
-        self: Arc<Self>,
-        _: tonic::Request<proto::ContainerStatusStreamRequest>,
-    ) -> Result<tonic::Response<Self::SubscribeContainerStatusStream>, tonic::Status> {
-        Ok(tonic::Response::new(
-            self.docker.subscribe_state_stream().map(Box::new(
-                |container: Arc<ManagedContainer>| {
-                    Ok(proto::ContainerStatusNotification {
-                        container_id: container.deimos_id().owned(),
-                        up_state: Self::container_api_run_status(&container.state()) as i32,
-                    })
-                },
-            )),
-        ))
-    }
-
-    async fn update_container(
-        self: Arc<Self>,
-        req: tonic::Request<proto::UpdateContainerRequest>,
-    ) -> Result<tonic::Response<proto::UpdateContainerResponse>, tonic::Status> {
-        let req = req.into_inner();
-        let Ok(method) = proto::ContainerUpState::try_from(req.method) else {
-            return Err(tonic::Status::invalid_argument("Request method"));
-        };
-        match self.docker.containers.get(req.id.as_str()).cloned() {
-            Some(c) => {
-                match method {
-                    proto::ContainerUpState::Running => {
-                        tokio::task::spawn(async move {
-                            let mut ts = c.transaction().await;
-                            if let Err(e) = self.start(&mut ts).await {
-                                tracing::error!(
-                                    "Failed to start server in response to gRPC request: {e}"
-                                );
-                            }
-                        });
-                    }
-                    proto::ContainerUpState::Dead => {
-                        tokio::task::spawn(async move {
-                            let mut ts = c.transaction().await;
-                            if let Err(e) = self.destroy(&mut ts).await {
-                                tracing::error!(
-                                    "Failed to destroy server in response to gRPC request: {e}"
-                                );
-                            }
-                        });
-                    }
-                    _ => (),
-                };
-
-                Ok(tonic::Response::new(proto::UpdateContainerResponse {}))
-            }
-            None => Err(tonic::Status::not_found(format!(
-                "No such container: {}",
-                req.id
-            ))),
-        }
-    }
+    
 }
 
 #[derive(Debug, thiserror::Error)]
