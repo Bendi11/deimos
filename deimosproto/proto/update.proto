@@ -2,11 +2,11 @@ syntax = "proto3";
 
 package deimos;
 
-import "container.proto";
+import "pod.proto";
 
-message UpdateContainerRequest {
+message UpdatePodRequest {
     string id = 1;
-    ContainerUpState method = 2;
+    PodState method = 2;
 }
 
-message UpdateContainerResponse {}
+message UpdatePodResponse {}

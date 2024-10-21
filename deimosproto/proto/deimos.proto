@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package deimos;
 
-import public "container.proto";
+import public "pod.proto";
 import public "status.proto";
 import public "query.proto";
 import public "update.proto";
@@ -10,9 +10,9 @@ import public "update.proto";
 
 service DeimosService {
     // List brief descriptions of all containers managed by the server
-    rpc QueryContainers(QueryContainersRequest) returns(QueryContainersResponse);
+    rpc QueryPods(QueryPodsRequest) returns(QueryPodsResponse);
     
-    rpc SubscribeContainerStatus(ContainerStatusStreamRequest) returns(stream ContainerStatusNotification);
+    rpc SubscribePodStatus(PodStatusStreamRequest) returns(stream PodStatusNotification);
 
-    rpc UpdateContainer(UpdateContainerRequest) returns(UpdateContainerResponse);
+    rpc UpdatePod(UpdatePodRequest) returns(UpdatePodResponse);
 }

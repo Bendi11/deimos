@@ -95,7 +95,19 @@ impl Deimos {
 
 #[async_trait]
 impl proto::DeimosService for Deimos {
-    
+    fn query_pods(self: Arc<Self>, req: tonic::Request<proto::QueryPodsRequest>) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
+        unimplemented!("")
+    }
+
+    fn update_pod(self: Arc<Self>, req: tonic::Request<proto::UpdatePodRequest>) -> Result<tonic::Response<proto::UpdatePodResponse>, tonic::Status> {
+        unimplemented!("")
+    }
+
+    type SubscribePodStatusStream = ();
+
+    fn subscribe_pod_status(self: Arc<Self>, req: tonic::Request<proto::PodStatusStreamRequest>) -> Result<Self::SubscribePodStatusStream, tonic::Status> {
+        unimplemented!("")
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

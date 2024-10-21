@@ -2,10 +2,10 @@ syntax = "proto3";
 
 package deimos;
 
-import "container.proto";
+import "pod.proto";
 
-message QueryContainersRequest {}
+message QueryPodsRequest {}
 
-message QueryContainersResponse {
-    repeated ContainerBrief containers = 1;
+message QueryPodsResponse {
+    repeated PodBrief containers = 1;
 }

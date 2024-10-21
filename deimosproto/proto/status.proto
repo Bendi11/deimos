@@ -2,11 +2,11 @@ syntax = "proto3";
 
 package deimos;
 
-import "container.proto";
+import "pod.proto";
 
-message ContainerStatusStreamRequest {}
+message PodStatusStreamRequest {}
 
-message ContainerStatusNotification {
-    string container_id = 1;
-    ContainerUpState up_state = 2;
+message PodStatusNotification {
+    string id = 1;
+    PodState up_state = 2;
 }
