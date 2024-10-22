@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use crate::pod::{manager::PodManager, Pod, PodPaused, PodStateKnown};
 
-
-
 impl PodManager {
     /// Pause the given container if it is enabled and running, or no-op
     pub async fn pause(&self, pod: Arc<Pod>) -> Result<(), PausePodResult> {
@@ -12,17 +10,14 @@ impl PodManager {
             PodStateKnown::Disabled => Err(PausePodResult::PodDisabled),
             PodStateKnown::Paused(..) => Ok(()),
             PodStateKnown::Enabled(ref run) => {
-                self
-                    .docker
+                self.docker
                     .pause_container(&run.docker_id)
                     .await
                     .map_err(PausePodResult::Docker)?;
 
-                lock.set(PodStateKnown::Paused(
-                    PodPaused {
-                        docker_id: run.docker_id.clone()
-                    }
-                ));
+                lock.set(PodStateKnown::Paused(PodPaused {
+                    docker_id: run.docker_id.clone(),
+                }));
 
                 Ok(())
             }

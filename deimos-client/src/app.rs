@@ -157,10 +157,9 @@ impl DeimosApplication {
             .push(self.sidebar.view(&self.ctx).map(DeimosMessage::Sidebar))
             .push(match self.view {
                 DeimosView::Settings => self.settings.view(&self.ctx).map(DeimosMessage::Settings),
-                DeimosView::ContainerView => self
-                    .pod_view
-                    .view(&self.ctx)
-                    .map(DeimosMessage::PodView),
+                DeimosView::ContainerView => {
+                    self.pod_view.view(&self.ctx).map(DeimosMessage::PodView)
+                }
                 _ => self.empty_view(),
             })
             .into()

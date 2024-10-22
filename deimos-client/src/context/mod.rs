@@ -1,18 +1,16 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
-use pod::{
-    CachedPod, CachedPodData, CachedPodState, CachedPodStateFull,
-};
 use deimosproto::DeimosServiceClient;
 use http::Uri;
 use iced::futures::{Stream, StreamExt};
+use pod::{CachedPod, CachedPodData, CachedPodState, CachedPodStateFull};
 use slotmap::SlotMap;
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
 
-pub mod pod;
 mod load;
+pub mod pod;
 
 slotmap::new_key_type! {
     pub struct PodRef;
@@ -168,13 +166,11 @@ impl Context {
     }
 
     fn get_pod(&self, id: &str) -> Option<&CachedPod> {
-        self.get_pod_ref(id)
-            .and_then(|r| self.pods.get(r))
+        self.get_pod_ref(id).and_then(|r| self.pods.get(r))
     }
 
     fn get_pod_mut(&mut self, id: &str) -> Option<&mut CachedPod> {
-        self.get_pod_ref(id)
-            .and_then(|r| self.pods.get_mut(r))
+        self.get_pod_ref(id).and_then(|r| self.pods.get_mut(r))
     }
 
     pub fn update(&mut self, msg: ContextMessage) -> iced::Task<ContextMessage> {
@@ -209,20 +205,19 @@ impl Context {
                 match self.get_pod_mut(&notify.id) {
                     Some(pod) => {
                         tracing::trace!("Got status notification for {}", notify.id);
-                        pod.data.up =
-                            match deimosproto::PodState::try_from(notify.state)
-                                .map(CachedPodState::from)
-                            {
-                                Ok(up) => up.into(),
-                                Err(_) => {
-                                    tracing::error!(
-                                        "Unknown up status {} received for pod '{}'",
-                                        notify.state,
-                                        notify.id
-                                    );
-                                    return iced::Task::none();
-                                }
-                            };
+                        pod.data.up = match deimosproto::PodState::try_from(notify.state)
+                            .map(CachedPodState::from)
+                        {
+                            Ok(up) => up.into(),
+                            Err(_) => {
+                                tracing::error!(
+                                    "Unknown up status {} received for pod '{}'",
+                                    notify.state,
+                                    notify.id
+                                );
+                                return iced::Task::none();
+                            }
+                        };
                         iced::Task::none()
                     }
                     None => {
@@ -242,10 +237,7 @@ impl Context {
         };
         iced::Task::future(async move {
             let mut api = api.lock().await;
-            match api
-                .query_pods(deimosproto::QueryPodsRequest {})
-                .await
-            {
+            match api.query_pods(deimosproto::QueryPodsRequest {}).await {
                 Ok(resp) => ContextMessage::BeginSynchronizeFromQuery(resp.into_inner()),
                 Err(e) => {
                     tracing::error!("Failed to query pods from server: {e}");
@@ -256,11 +248,7 @@ impl Context {
     }
 
     /// Change the given container's status on the server
-    pub fn update_pod(
-        &mut self,
-        pod: PodRef,
-        run: CachedPodState,
-    ) -> iced::Task<ContextMessage> {
+    pub fn update_pod(&mut self, pod: PodRef, run: CachedPodState) -> iced::Task<ContextMessage> {
         let id = match self.pods.get_mut(pod) {
             Some(pod) => {
                 pod.data.up = CachedPodStateFull::UpdateRequested {
@@ -319,9 +307,7 @@ impl Context {
         });
 
         let tasks = resp.pods.into_iter().filter_map(|new| {
-            let up = match deimosproto::PodState::try_from(new.state)
-                .map(CachedPodState::from)
-            {
+            let up = match deimosproto::PodState::try_from(new.state).map(CachedPodState::from) {
                 Ok(up) => up,
                 Err(_) => {
                     tracing::error!(
@@ -345,11 +331,7 @@ impl Context {
                 }
                 None => {
                     tracing::info!("Got new container {} from server", data.id);
-                    self.pods.insert(
-                        CachedPod {
-                            data,
-                        }
-                    );
+                    self.pods.insert(CachedPod { data });
                     None
                 }
             }

@@ -9,7 +9,7 @@ use iced::{
 
 use crate::context::{
     pod::{CachedPod, CachedPodState, CachedPodStateFull},
-    PodRef, Context,
+    Context, PodRef,
 };
 
 use super::{
@@ -123,27 +123,19 @@ impl Sidebar {
     ) -> Element<'a, SidebarMessage> {
         let (msg, svg) = match container.data.up {
             CachedPodStateFull::Known(CachedPodState::Disabled) => (
-                Some(SidebarMessage::UpdateContainer(
-                    r,
-                    CachedPodState::Enabled,
-                )),
+                Some(SidebarMessage::UpdateContainer(r, CachedPodState::Enabled)),
                 Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
             ),
             CachedPodStateFull::Known(CachedPodState::Paused) => (
-                Some(SidebarMessage::UpdateContainer(
-                    r,
-                    CachedPodState::Enabled,
-                )),
+                Some(SidebarMessage::UpdateContainer(r, CachedPodState::Enabled)),
                 Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
             ),
             CachedPodStateFull::Known(CachedPodState::Enabled) => (
-                Some(SidebarMessage::UpdateContainer(
-                    r,
-                    CachedPodState::Disabled,
-                )),
+                Some(SidebarMessage::UpdateContainer(r, CachedPodState::Disabled)),
                 Svg::new(self.stop.clone()).class(orbit::MARS[1]),
             ),
-            CachedPodStateFull::Known(CachedPodState::Transit) | CachedPodStateFull::UpdateRequested { .. } => {
+            CachedPodStateFull::Known(CachedPodState::Transit)
+            | CachedPodStateFull::UpdateRequested { .. } => {
                 (None, Svg::new(self.reload.clone()).class(orbit::EARTH[2]))
             }
         };

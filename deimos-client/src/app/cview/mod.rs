@@ -1,6 +1,6 @@
 use iced::{Length, Padding};
 
-use crate::context::{PodRef, Context};
+use crate::context::{Context, PodRef};
 
 use super::style::{Column, Element, Rule, Text};
 
@@ -33,11 +33,7 @@ impl PodView {
             .into()
     }
 
-    pub fn update(
-        &mut self,
-        ctx: &mut Context,
-        msg: PodViewMessage,
-    ) -> iced::Task<PodViewMessage> {
+    pub fn update(&mut self, ctx: &mut Context, msg: PodViewMessage) -> iced::Task<PodViewMessage> {
         match msg {
             PodViewMessage::ChangeView(c) => {
                 self.viewed = Some(c);

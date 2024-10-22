@@ -44,14 +44,14 @@ impl ApiState {
     /// to manage containers
     pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
         let lease = match config.upnp {
-            true => match upnp.request(
-                std::iter::once(UpnpLeaseData {
+            true => match upnp
+                .request(std::iter::once(UpnpLeaseData {
                     port: config.bind.port(),
                     protocol: PortMappingProtocol::TCP,
-                    name: "Deimos gRPC server".to_owned()
-                    })
-                )
-                .await {
+                    name: "Deimos gRPC server".to_owned(),
+                }))
+                .await
+            {
                 Ok(lease) => Some(lease),
                 Err(e) => {
                     tracing::error!("Failed to get UPnP lease for gRPC server: {e}");
@@ -65,8 +65,7 @@ impl ApiState {
     }
 
     async fn init_server(config: &ApiConfig) -> Result<Server, ApiInitError> {
-        let server = Server::builder()
-            .timeout(config.timeout);
+        let server = Server::builder().timeout(config.timeout);
         Ok(server)
     }
 }
@@ -80,7 +79,7 @@ impl Deimos {
             Ok(server) => server,
             Err(e) => {
                 tracing::error!("Failed to initialize gRPC server: {e}");
-                return
+                return;
             }
         };
 
@@ -95,11 +94,13 @@ impl Deimos {
             }
         }
     }
-    
+
     /// Get a pod by the ID as received from a client, and map not found to a [tonic::Status]
     /// indicating the error
     fn lookup_pod(&self, id: String) -> Result<Arc<Pod>, tonic::Status> {
-        self.pods.get(&id).ok_or_else(|| tonic::Status::not_found(id))
+        self.pods
+            .get(&id)
+            .ok_or_else(|| tonic::Status::not_found(id))
     }
 }
 
@@ -114,92 +115,102 @@ impl From<PodState> for proto::PodState {
     }
 }
 
-
 #[async_trait]
 impl proto::DeimosService for Deimos {
-    async fn query_pods(self: Arc<Self>, _: tonic::Request<proto::QueryPodsRequest>) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
+    async fn query_pods(
+        self: Arc<Self>,
+        _: tonic::Request<proto::QueryPodsRequest>,
+    ) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
         let pods = self
             .pods
             .iter()
-            .map(
-                |(_, pod)|
-                    proto::PodBrief {
-                        id: pod.id().owned(),
-                        title: pod.title().to_owned(),
-                        state: proto::PodState::from(pod.state()) as i32
-                    }
-            )
+            .map(|(_, pod)| proto::PodBrief {
+                id: pod.id().owned(),
+                title: pod.title().to_owned(),
+                state: proto::PodState::from(pod.state()) as i32,
+            })
             .collect::<Vec<_>>();
 
-        Ok(
-            tonic::Response::new(
-                proto::QueryPodsResponse {
-                    pods
-                }
-            )
-        )
+        Ok(tonic::Response::new(proto::QueryPodsResponse { pods }))
     }
 
-   async fn update_pod(self: Arc<Self>, req: tonic::Request<proto::UpdatePodRequest>) -> Result<tonic::Response<proto::UpdatePodResponse>, tonic::Status> {
+    async fn update_pod(
+        self: Arc<Self>,
+        req: tonic::Request<proto::UpdatePodRequest>,
+    ) -> Result<tonic::Response<proto::UpdatePodResponse>, tonic::Status> {
         let req = req.into_inner();
         let pod = self.lookup_pod(req.id)?;
         let id = pod.id();
 
         match proto::PodState::try_from(req.method) {
-            Ok(proto::PodState::Disabled) => tokio::task::spawn(
-                async move {
-                    if let Err(e) = self.pods.disable(pod).await {
-                        tracing::error!("Failed ot disable pod {} in response to API request: {}", id, e);
-                    }
+            Ok(proto::PodState::Disabled) => tokio::task::spawn(async move {
+                if let Err(e) = self.pods.disable(pod).await {
+                    tracing::error!(
+                        "Failed ot disable pod {} in response to API request: {}",
+                        id,
+                        e
+                    );
                 }
-            ),
-            Ok(proto::PodState::Enabled) => tokio::task::spawn(
-                async move {
-                    if let Err(e) = self.pods.enable(pod).await {
-                        tracing::error!("Failed to enable pod {} in response to API request: {}", id, e);
-                    }
+            }),
+            Ok(proto::PodState::Enabled) => tokio::task::spawn(async move {
+                if let Err(e) = self.pods.enable(pod).await {
+                    tracing::error!(
+                        "Failed to enable pod {} in response to API request: {}",
+                        id,
+                        e
+                    );
                 }
-            ),
-            Ok(proto::PodState::Paused) => tokio::task::spawn(
-                async move {
-                    if let Err(e) = self.pods.pause(pod).await {
-                        tracing::error!("Failed to puase pod {} in response to API request: {}", id, e);
-                    }
+            }),
+            Ok(proto::PodState::Paused) => tokio::task::spawn(async move {
+                if let Err(e) = self.pods.pause(pod).await {
+                    tracing::error!(
+                        "Failed to puase pod {} in response to API request: {}",
+                        id,
+                        e
+                    );
                 }
-            ),
-            Ok(proto::PodState::Transit) => return Err(
-                tonic::Status::invalid_argument(String::from("Cannot set pod to reserved state Transit"))
-            ),
-            Err(_) => return Err(
-                tonic::Status::invalid_argument(format!("Unknown pod state enumeration value {}", req.method))
-            )
+            }),
+            Ok(proto::PodState::Transit) => {
+                return Err(tonic::Status::invalid_argument(String::from(
+                    "Cannot set pod to reserved state Transit",
+                )))
+            }
+            Err(_) => {
+                return Err(tonic::Status::invalid_argument(format!(
+                    "Unknown pod state enumeration value {}",
+                    req.method
+                )))
+            }
         };
 
-        Ok(
-            tonic::Response::new(
-                proto::UpdatePodResponse {}
-            )
-        )
+        Ok(tonic::Response::new(proto::UpdatePodResponse {}))
     }
 
     type SubscribePodStatusStream = futures::stream::Map<
         PodStateStream,
-        Box<dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status> + Send + Sync>
+        Box<
+            dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status>
+                + Send
+                + Sync,
+        >,
     >;
 
-    async fn subscribe_pod_status(self: Arc<Self>, _: tonic::Request<proto::PodStatusStreamRequest>) -> Result<tonic::Response<Self::SubscribePodStatusStream>, tonic::Status> {
-        let stream = self
-            .pods
-            .stream()
-            .map(
-                Box::<dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status> + Send + Sync>::from(
-                    Box::new(move |(id, state)| Ok(proto::PodStatusNotification { id: id.owned(), state: proto::PodState::from(state) as i32 }))
-                )
-            );
+    async fn subscribe_pod_status(
+        self: Arc<Self>,
+        _: tonic::Request<proto::PodStatusStreamRequest>,
+    ) -> Result<tonic::Response<Self::SubscribePodStatusStream>, tonic::Status> {
+        let stream = self.pods.stream().map(Box::<
+            dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status>
+                + Send
+                + Sync,
+        >::from(Box::new(move |(id, state)| {
+            Ok(proto::PodStatusNotification {
+                id: id.owned(),
+                state: proto::PodState::from(state) as i32,
+            })
+        })));
 
-        Ok(
-            tonic::Response::new(stream)
-        )
+        Ok(tonic::Response::new(stream))
     }
 }
 

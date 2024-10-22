@@ -1,14 +1,24 @@
-use std::{collections::HashMap, future::Future, path::{Path, PathBuf}, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    future::Future,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use bollard::Docker;
-use futures::{future::BoxFuture, stream::{FuturesUnordered, SelectAll}, Stream, StreamExt};
+use futures::{
+    future::BoxFuture,
+    stream::{FuturesUnordered, SelectAll},
+    Stream, StreamExt,
+};
 use tokio_util::sync::ReusableBoxFuture;
 
 use super::{id::DeimosId, Pod, PodState};
 
 mod config;
 
-pub use config::{PodManagerConfig, DockerConnectionConfig, DockerConnectionType};
+pub use config::{DockerConnectionConfig, DockerConnectionType, PodManagerConfig};
 
 /// Manager responsible for orchestrating Docker containers and watching for external events and
 /// failures
@@ -18,12 +28,11 @@ pub struct PodManager {
     pods: HashMap<DeimosId, Arc<Pod>>,
 }
 
-
 pub type PodStateStream = SelectAll<
     futures::stream::Map<
         tokio_stream::wrappers::WatchStream<PodState>,
         Box<dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync>,
-    >
+    >,
 >;
 
 impl PodManager {
@@ -32,12 +41,23 @@ impl PodManager {
     /// given.
     pub async fn init(config: PodManagerConfig) -> Result<Self, PodManagerInitError> {
         let docker = match config.docker {
-            None => Docker::connect_with_local_defaults()
-                .map(|docker| docker.with_timeout(Duration::from_secs(DockerConnectionConfig::default_timeout()))),
+            None => Docker::connect_with_local_defaults().map(|docker| {
+                docker.with_timeout(Duration::from_secs(
+                    DockerConnectionConfig::default_timeout(),
+                ))
+            }),
             Some(ref conn) => match conn.kind {
-                DockerConnectionType::Http => Docker::connect_with_http(&conn.addr, conn.timeout, bollard::API_DEFAULT_VERSION),
-                DockerConnectionType::Local => Docker::connect_with_local(&conn.addr, conn.timeout, bollard::API_DEFAULT_VERSION),
-            }
+                DockerConnectionType::Http => Docker::connect_with_http(
+                    &conn.addr,
+                    conn.timeout,
+                    bollard::API_DEFAULT_VERSION,
+                ),
+                DockerConnectionType::Local => Docker::connect_with_local(
+                    &conn.addr,
+                    conn.timeout,
+                    bollard::API_DEFAULT_VERSION,
+                ),
+            },
         }?;
 
         let pods = Self::load_containers(&config.containerdir).await?;
@@ -45,81 +65,91 @@ impl PodManager {
             tracing::warn!("Starting pod manager with no pods configured");
         }
 
-        Ok(
-            Self {
-                config,
-                docker,
-                pods,
-            }
-        )
+        Ok(Self {
+            config,
+            docker,
+            pods,
+        })
     }
-    
+
     /// Get a stream of state changes made to containers, with their associated ID
     pub fn stream(&self) -> PodStateStream {
-        let iter = self
-            .pods
-            .values()
-            .cloned()
-            .map(|pod| {
-                let id = pod.id();
-                tokio_stream::wrappers::WatchStream::new(pod.state.tx.subscribe())
-                    .map(
-                        Box::<dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync>::from(
-                            Box::new(move |state| (id.clone(), state))
-                        )
-                    )
-            });
+        let iter = self.pods.values().cloned().map(|pod| {
+            let id = pod.id();
+            tokio_stream::wrappers::WatchStream::new(pod.state.tx.subscribe()).map(Box::<
+                dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync,
+            >::from(
+                Box::new(move |state| (id.clone(), state)),
+            ))
+        });
 
         futures::stream::select_all(iter)
     }
-    
+
     /// Get a reference to the pod with the given ID
     pub fn get(&self, id: &str) -> Option<Arc<Pod>> {
         self.pods.get(id).cloned()
     }
-    
+
     /// Load all containers from directory entries in the given containers directory,
     /// logging errors and ignoring on failure
-    async fn load_containers(dir: &Path) -> Result<HashMap<DeimosId, Arc<Pod>>, PodManagerInitError> {
+    async fn load_containers(
+        dir: &Path,
+    ) -> Result<HashMap<DeimosId, Arc<Pod>>, PodManagerInitError> {
         let mut pods = HashMap::new();
 
-        let mut iter = tokio::fs::read_dir(dir)
-            .await
-            .map_err(|err| PodManagerInitError::PodRead { path: dir.to_owned(), err })?;
+        let mut iter =
+            tokio::fs::read_dir(dir)
+                .await
+                .map_err(|err| PodManagerInitError::PodRead {
+                    path: dir.to_owned(),
+                    err,
+                })?;
 
         loop {
             let entry = match iter.next_entry().await {
                 Ok(Some(entry)) => entry,
                 Ok(None) => break,
                 Err(e) => {
-                    tracing::error!("Failed to read directory entry from pod directory {}: {}", dir.display(), e);
-                    continue
+                    tracing::error!(
+                        "Failed to read directory entry from pod directory {}: {}",
+                        dir.display(),
+                        e
+                    );
+                    continue;
                 }
             };
-            
+
             let path = entry.path();
 
             match entry.file_type().await {
                 Ok(ft) if ft.is_dir() => match Pod::load(&entry.path()).await {
                     Ok(pod) => {
                         pods.insert(pod.id(), Arc::new(pod));
-                    },
+                    }
                     Err(e) => {
                         tracing::error!("Failed to load container from {}: {}", path.display(), e);
-                    },
+                    }
                 },
                 Ok(..) => {
-                    tracing::warn!("Ignoring non-directory entry {} in pod directory", path.display());
-                },
+                    tracing::warn!(
+                        "Ignoring non-directory entry {} in pod directory",
+                        path.display()
+                    );
+                }
                 Err(e) => {
-                    tracing::error!("Failed to get file type of entry {} in pod directory: {}", path.display(), e);
+                    tracing::error!(
+                        "Failed to get file type of entry {} in pod directory: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
 
         Ok(pods)
     }
-    
+
     /// Get an immutable iterator over references to the managed pods
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a DeimosId, &'a Arc<Pod>)> {
         self.pods.iter()
@@ -135,14 +165,10 @@ impl<'a> IntoIterator for &'a PodManager {
     }
 }
 
-
 #[derive(Debug, thiserror::Error)]
 pub enum PodManagerInitError {
     #[error("Failed to create Docker client: {0}")]
     Docker(#[from] bollard::errors::Error),
     #[error("Failed to read entries from pod directory {}: {}", path.display(), err)]
-    PodRead {
-        path: PathBuf,
-        err: std::io::Error,
-    }
+    PodRead { path: PathBuf, err: std::io::Error },
 }

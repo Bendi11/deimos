@@ -4,12 +4,10 @@ use config::PodConfig;
 use id::{DeimosId, DockerId};
 use tokio::sync::Mutex;
 
-
 pub mod config;
-pub mod id;
 pub mod docker;
+pub mod id;
 pub mod manager;
-
 
 /// Represents a single pod with associated config and running Docker container if any exists
 pub struct Pod {
@@ -34,14 +32,14 @@ pub enum PodState {
     Disabled,
     Transit,
     Paused,
-    Enabled
+    Enabled,
 }
 
 /// State of a pod with the guarantee that the state is always known
 pub enum PodStateKnown {
     Disabled,
     Paused(PodPaused),
-    Enabled(PodEnable)
+    Enabled(PodEnable),
 }
 
 pub struct PodEnable {
@@ -57,23 +55,23 @@ impl Pod {
     pub fn title(&self) -> &str {
         &self.config.name
     }
-    
+
     /// Get the ID used to refer to the container in API requests
     pub fn id(&self) -> DeimosId {
         self.config.id.clone()
     }
-    
+
     /// Get an immutable reference to the current state
     pub fn state(&self) -> PodState {
         self.state.current()
     }
-    
+
     /// Wait until other mutable accesses to the current state have finished, then acquire a lock
     /// and return
     pub async fn state_lock(&self) -> PodStateWriteHandle {
         self.state.lock().await
     }
-    
+
     /// Load the pod from config files located in the given directory
     async fn load(dir: &Path) -> Result<Self, PodLoadError> {
         const CONFIG_FILENAME: &str = "pod.toml";
@@ -86,12 +84,7 @@ impl Pod {
         let config = toml::from_str(&config_str)?;
         let state = PodStateHandle::new(PodStateKnown::Disabled);
 
-        Ok(
-            Self {
-                config,
-                state,
-            }
-        )
+        Ok(Self { config, state })
     }
 }
 
@@ -100,10 +93,7 @@ impl PodStateHandle {
         let (tx, _) = tokio::sync::watch::channel(PodState::from(&state));
         let lock = Mutex::new(state);
 
-        Self {
-            lock,
-            tx,
-        }
+        Self { lock, tx }
     }
 
     /// Lock the handle to allow mutations to the current state
@@ -113,11 +103,10 @@ impl PodStateHandle {
             tx: self.tx.clone(),
         }
     }
-    
+
     /// Get the current state
     pub fn current(&self) -> PodState {
-        self
-            .lock
+        self.lock
             .try_lock()
             .as_deref()
             .map(Into::into)
@@ -140,7 +129,7 @@ impl<'a> PodStateWriteHandle<'a> {
     pub fn state(&self) -> &PodStateKnown {
         &self.lock
     }
-    
+
     /// Set the current state to the given value
     pub fn set(&mut self, state: PodStateKnown) {
         self.tx.send_replace((&state).into());
@@ -151,10 +140,7 @@ impl<'a> PodStateWriteHandle<'a> {
 #[derive(Debug, thiserror::Error)]
 pub enum PodLoadError {
     #[error("Failed to read config file {}: {}", path.display(), err)]
-    ConfigRead {
-        path: PathBuf,
-        err: std::io::Error,
-    },
+    ConfigRead { path: PathBuf, err: std::io::Error },
     #[error("Failed to parse config file: {0}")]
     ConfigParse(#[from] toml::de::Error),
 }

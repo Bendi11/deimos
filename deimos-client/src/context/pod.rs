@@ -131,12 +131,13 @@ impl CachedPodData {
     /// Load only the cached metadata for a cached container, without loading large images yet
     async fn load(directory: &Path) -> Result<Self, CachedPodLoadError> {
         let meta_path = directory.join(CachedPod::METADATA_FILE);
-        let data_str = tokio::fs::read_to_string(&meta_path).await.map_err(|err| {
-            CachedPodLoadError::IO {
-                path: meta_path,
-                err,
-            }
-        })?;
+        let data_str =
+            tokio::fs::read_to_string(&meta_path)
+                .await
+                .map_err(|err| CachedPodLoadError::IO {
+                    path: meta_path,
+                    err,
+                })?;
         serde_json::from_str::<CachedPodData>(&data_str).map_err(Into::into)
     }
 
@@ -144,11 +145,10 @@ impl CachedPodData {
     fn save(&self, directory: &Path) -> Result<(), CachedPodSaveError> {
         let meta_path = directory.join(CachedPod::METADATA_FILE);
 
-        let mut file =
-            std::fs::File::create(&meta_path).map_err(|err| CachedPodSaveError::IO {
-                path: meta_path.clone(),
-                err,
-            })?;
+        let mut file = std::fs::File::create(&meta_path).map_err(|err| CachedPodSaveError::IO {
+            path: meta_path.clone(),
+            err,
+        })?;
 
         let bytes = serde_json::to_vec(self)?;
         file.write_all(&bytes)

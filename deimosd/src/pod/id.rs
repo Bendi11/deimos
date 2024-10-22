@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct DeimosId(Arc<str>);
 
 /// ID of a docker container as retrieved from the Docker API
-#[derive(Debug, Clone, PartialEq, Eq, Hash,)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DockerId(Arc<str>);
 
 impl DeimosId {

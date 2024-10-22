@@ -2,7 +2,6 @@ use std::{path::PathBuf, sync::Arc};
 
 use super::id::DeimosId;
 
-
 /// Top-level configuration for a Pod, parsed from TOML files
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]

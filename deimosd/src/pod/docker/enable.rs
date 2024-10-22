@@ -1,7 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::pod::{config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodEnable, PodStateKnown};
-
+use crate::pod::{
+    config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodEnable, PodStateKnown,
+};
 
 impl PodManager {
     /// Top-level operation to enable the given pod.
@@ -15,42 +16,36 @@ impl PodManager {
             PodStateKnown::Disabled => {
                 let container = self.create_container(&pod).await?;
                 if let Err(e) = self.start_container(&container).await {
-                    tracing::warn!("Container for pod {} failed to start, destroying it", pod.id());
+                    tracing::warn!(
+                        "Container for pod {} failed to start, destroying it",
+                        pod.id()
+                    );
                     if let Err(e) = self.destroy_container(&container, true).await {
                         tracing::error!("Failsafe destroy failed for pod {}: {}", pod.id(), e);
                     }
-                    
-                    return Err(e)
+
+                    return Err(e);
                 }
 
                 container
-            },
+            }
         };
-        
-        lock.set(
-            PodStateKnown::Enabled(
-                PodEnable {
-                    docker_id,
-                }
-            )
-        );
+
+        lock.set(PodStateKnown::Enabled(PodEnable { docker_id }));
 
         Ok(())
     }
-    
-    
-    async fn create_container(&self, pod: &Pod) -> Result<DockerId, PodEnableError> {        
+
+    async fn create_container(&self, pod: &Pod) -> Result<DockerId, PodEnableError> {
         let config = docker_config(&pod.config.docker);
         let create_response = self
             .docker
             .create_container(
-                Some(
-                    bollard::container::CreateContainerOptions {
-                        name: pod.id().owned(),
-                        platform: None,
-                    }
-                ),
-                config
+                Some(bollard::container::CreateContainerOptions {
+                    name: pod.id().owned(),
+                    platform: None,
+                }),
+                config,
             )
             .await
             .map_err(PodEnableError::CreateContainer)?;
@@ -66,11 +61,10 @@ impl PodManager {
     }
 
     async fn start_container(&self, container: &DockerId) -> Result<(), PodEnableError> {
-        self
-            .docker
+        self.docker
             .start_container(
                 container,
-                Option::<bollard::container::StartContainerOptions::<&'static str>>::None
+                Option::<bollard::container::StartContainerOptions<&'static str>>::None,
             )
             .await
             .map_err(PodEnableError::StartContainer)

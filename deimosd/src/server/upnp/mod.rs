@@ -22,7 +22,7 @@ pub struct Upnp {
 
 #[derive(Clone, Default)]
 struct UpnpLeases {
-    map: DashMap<u16, UpnpLeaseData>
+    map: DashMap<u16, UpnpLeaseData>,
 }
 
 /// Data required for UPNP lease
@@ -38,9 +38,8 @@ pub struct UpnpLeaseData {
 #[derive(Clone)]
 pub struct UpnpLease {
     leases: UpnpLeases,
-    ports: Arc<[u16]>
+    ports: Arc<[u16]>,
 }
-
 
 impl Deimos {
     /// Run a task to refresh all UPnP leases periodically
@@ -64,21 +63,25 @@ impl Upnp {
         let leases = UpnpLeases::default();
         let refresh = Notify::new();
 
-        Ok(Self { local_ip, leases, refresh })
+        Ok(Self {
+            local_ip,
+            leases,
+            refresh,
+        })
     }
-    
+
     /// Task run to repeatedly renew all UPnP leases
     pub async fn task(&self) {
         let gateway = match igd_next::aio::tokio::search_gateway(Default::default()).await {
             Ok(gateway) => gateway,
             Err(igd_next::SearchError::NoResponseWithinTimeout) => {
                 tracing::warn!("No IGD enabled gateway located within timeout, port forwarding with UPnP will be disabled");
-                return
-            },
+                return;
+            }
             Err(e) => {
                 tracing::error!("Failed to search IGD gateways: {e} - port forwarding with UPnP will be disabled");
-                return
-            },
+                return;
+            }
         };
 
         let mut renewal_interval = tokio::time::interval(Self::RENEWAL_INTERVAL);
@@ -96,7 +99,7 @@ impl Upnp {
             }
         }
     }
-    
+
     /// Request the given mapping from the IGD gateway
     async fn accquire(&self, gateway: &Gateway<Tokio>, lease: &UpnpLeaseData) {
         match gateway
@@ -110,7 +113,12 @@ impl Upnp {
             .await
         {
             Ok(_) => {
-                tracing::trace!("Added UPNP lease for {} port {} named '{}'", lease.protocol, lease.port, lease.name);
+                tracing::trace!(
+                    "Added UPNP lease for {} port {} named '{}'",
+                    lease.protocol,
+                    lease.port,
+                    lease.name
+                );
             }
             Err(e) => {
                 tracing::warn!(
@@ -122,10 +130,13 @@ impl Upnp {
             }
         }
     }
-    
+
     /// Request the given block of UPnP leases, returning a structure that will maintain the ports
     /// mapped until it is dropped
-    pub async fn request(&self, leases: impl IntoIterator<Item = UpnpLeaseData>) -> Result<UpnpLease, UpnpError> {
+    pub async fn request(
+        &self,
+        leases: impl IntoIterator<Item = UpnpLeaseData>,
+    ) -> Result<UpnpLease, UpnpError> {
         let lease = self.leases.add(leases).await?;
         self.refresh.notify_one();
 
@@ -135,28 +146,32 @@ impl Upnp {
 
 impl UpnpLeases {
     /// Request a new collection of ports to be forwarded
-    pub async fn add(&self, ports: impl IntoIterator<Item = UpnpLeaseData>) -> Result<UpnpLease, UpnpError> {
+    pub async fn add(
+        &self,
+        ports: impl IntoIterator<Item = UpnpLeaseData>,
+    ) -> Result<UpnpLease, UpnpError> {
         let lease_data = ports.into_iter().collect::<Vec<_>>();
 
         for data in lease_data.iter() {
             if self.map.contains_key(&data.port) {
-                return Err(UpnpError::InUse(data.port))
+                return Err(UpnpError::InUse(data.port));
             }
         }
-        
-        let ports = lease_data.iter().map(|data| data.port).collect::<Arc<[_]>>(); 
+
+        let ports = lease_data
+            .iter()
+            .map(|data| data.port)
+            .collect::<Arc<[_]>>();
         for (port, data) in lease_data.into_iter().map(|data| (data.port, data)) {
             self.map.insert(port, data);
         }
-        
-        Ok(
-            UpnpLease {
-                leases: self.clone(),
-                ports,
-            }
-        )
+
+        Ok(UpnpLease {
+            leases: self.clone(),
+            ports,
+        })
     }
-    
+
     /// Drop the given forwarded ports from the map.
     /// This function can be called from both async and non-async contexts - so `Drop`
     /// implementations can use it safely.

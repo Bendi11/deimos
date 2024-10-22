@@ -1,3 +1,3 @@
-mod enable;
 mod disable;
+mod enable;
 mod pause;

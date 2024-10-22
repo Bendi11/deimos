@@ -6,8 +6,8 @@ use deimosproto::util;
 use serde::Deserialize;
 use server::{Deimos, DeimosConfig};
 
-mod server;
 mod pod;
+mod server;
 
 const CONFIG_PATH: &str = "./deimos.toml";
 
