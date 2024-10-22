@@ -1,8 +1,8 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
-use container::{
-    CachedContainer, CachedContainerData, CachedContainerUpState, CachedContainerUpStateFull,
+use pod::{
+    CachedPod, CachedPodData, CachedPodState, CachedPodStateFull,
 };
 use deimosproto::DeimosServiceClient;
 use http::Uri;
@@ -11,11 +11,11 @@ use slotmap::SlotMap;
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
 
-pub mod container;
+pub mod pod;
 mod load;
 
 slotmap::new_key_type! {
-    pub struct ContainerRef;
+    pub struct PodRef;
 }
 
 /// Context shared across the application used to perform API requests and maintain a local
@@ -25,7 +25,7 @@ pub struct Context {
     /// Context state preserved in save files
     pub state: ContextState,
     /// A map of all loaded containers, to be modified by gRPC notifications
-    pub containers: SlotMap<ContainerRef, CachedContainer>,
+    pub pods: SlotMap<PodRef, CachedPod>,
     /// Directory that all container data and context state will be saved to
     cache_dir: PathBuf,
     api: Option<Arc<Mutex<DeimosServiceClient<Channel>>>>,
@@ -51,16 +51,16 @@ pub struct ContextState {
 #[derive(Clone, Debug)]
 pub enum ContextMessage {
     /// Loaded all container data from the local cache
-    Loaded(Vec<CachedContainer>),
+    Loaded(Vec<CachedPod>),
     /// gRPC client must be initialized in async context
     ClientInit(Box<DeimosServiceClient<Channel>>),
     /// Received a listing of containers from the server, so update our local cache to match.
     /// Also remove any containers if their IDs are not contained in the given response
-    BeginSynchronizeFromQuery(deimosproto::QueryContainersResponse),
+    BeginSynchronizeFromQuery(deimosproto::QueryPodsResponse),
     /// Received all container data including images, so update our in memory data
-    SynchronizeContainer(Box<CachedContainer>),
+    SynchronizePod(Box<CachedPod>),
     /// Notification received from the server
-    Notification(deimosproto::ContainerStatusNotification),
+    Notification(deimosproto::PodStatusNotification),
     /// An error occured in a future
     Error,
 }
@@ -71,22 +71,22 @@ impl Context {
     /// Save all context state and new data received for containers to the local cache directory
     pub fn save(&self) {
         self.save_state();
-        self.save_cached_containers();
+        self.save_cached_pods();
     }
 
-    async fn subscribe_container_events(
+    async fn subscribe_pod_events(
         api: Arc<Mutex<DeimosServiceClient<Channel>>>,
-    ) -> impl Stream<Item = Result<deimosproto::ContainerStatusNotification, tonic::Status>> {
+    ) -> impl Stream<Item = Result<deimosproto::PodStatusNotification, tonic::Status>> {
         loop {
             let result = api
                 .lock()
                 .await
-                .subscribe_container_status(deimosproto::ContainerStatusStreamRequest {})
+                .subscribe_pod_status(deimosproto::PodStatusStreamRequest {})
                 .await;
             match result {
                 Ok(stream) => break stream.into_inner(),
                 Err(e) => {
-                    tracing::error!("Failed to subscribe to container status notifications: {e}");
+                    tracing::error!("Failed to subscribe to pod status notifications: {e}");
                 }
             }
         }
@@ -98,14 +98,14 @@ impl Context {
     ) -> impl Stream<Item = ContextMessage> {
         async_stream::stream! {
             loop {
-                let mut stream = Self::subscribe_container_events(api.clone()).await;
+                let mut stream = Self::subscribe_pod_events(api.clone()).await;
                 while let Some(event) = stream.next().await {
                     match event {
                         Ok(event) => {
                             yield ContextMessage::Notification(event)
                         },
                         Err(e) => {
-                            tracing::error!("Failed to read container status notification: {e}");
+                            tracing::error!("Failed to read pod status notification: {e}");
                         }
                     }
                 }
@@ -116,7 +116,7 @@ impl Context {
     }
 
     /// Start a task to process container status notifications
-    fn container_notification_task(
+    fn pod_notification_task(
         api: Arc<Mutex<DeimosServiceClient<Channel>>>,
     ) -> iced::Task<ContextMessage> {
         iced::Task::stream(Self::subscription(api))
@@ -140,19 +140,19 @@ impl Context {
 
         let api = None;
         let state = state;
-        let containers = SlotMap::<ContainerRef, CachedContainer>::default();
+        let containers = SlotMap::<PodRef, CachedPod>::default();
 
         Self {
             state,
             api,
-            containers,
+            pods: containers,
             cache_dir,
         }
     }
 
     pub fn post_load_init(&self) -> iced::Task<ContextMessage> {
         iced::Task::perform(
-            Self::load_cached_containers(self.cache_dir.clone()),
+            Self::load_cached_pods(self.cache_dir.clone()),
             ContextMessage::Loaded,
         )
         .chain(iced::Task::perform(
@@ -161,64 +161,64 @@ impl Context {
         ))
     }
 
-    fn get_container_ref(&self, id: &str) -> Option<ContainerRef> {
-        self.containers
+    fn get_pod_ref(&self, id: &str) -> Option<PodRef> {
+        self.pods
             .iter()
             .find_map(|(k, v)| (v.data.id == id).then_some(k))
     }
 
-    fn get_container(&self, id: &str) -> Option<&CachedContainer> {
-        self.get_container_ref(id)
-            .and_then(|r| self.containers.get(r))
+    fn get_pod(&self, id: &str) -> Option<&CachedPod> {
+        self.get_pod_ref(id)
+            .and_then(|r| self.pods.get(r))
     }
 
-    fn get_container_mut(&mut self, id: &str) -> Option<&mut CachedContainer> {
-        self.get_container_ref(id)
-            .and_then(|r| self.containers.get_mut(r))
+    fn get_pod_mut(&mut self, id: &str) -> Option<&mut CachedPod> {
+        self.get_pod_ref(id)
+            .and_then(|r| self.pods.get_mut(r))
     }
 
     pub fn update(&mut self, msg: ContextMessage) -> iced::Task<ContextMessage> {
         match msg {
-            ContextMessage::Loaded(containers) => {
-                for c in containers {
-                    self.containers.insert(c);
+            ContextMessage::Loaded(pods) => {
+                for c in pods {
+                    self.pods.insert(c);
                 }
                 iced::Task::none()
             }
             ContextMessage::ClientInit(api) => {
                 let api = Arc::new(Mutex::new(*api));
                 self.api = Some(api.clone());
-                Self::container_notification_task(api)
+                Self::pod_notification_task(api)
             }
             ContextMessage::BeginSynchronizeFromQuery(resp) => {
                 self.begin_synchronize_from_query(resp)
             }
-            ContextMessage::SynchronizeContainer(container) => {
-                match self.get_container_ref(&container.data.id) {
+            ContextMessage::SynchronizePod(pod) => {
+                match self.get_pod_ref(&pod.data.id) {
                     Some(exist) => {
-                        self.containers[exist] = *container;
+                        self.pods[exist] = *pod;
                     }
                     None => {
-                        self.containers.insert(*container);
+                        self.pods.insert(*pod);
                     }
                 }
 
                 iced::Task::none()
             }
             ContextMessage::Notification(notify) => {
-                match self.get_container_mut(&notify.container_id) {
-                    Some(container) => {
-                        tracing::trace!("Got status notification for {}", notify.container_id);
-                        container.data.up =
-                            match deimosproto::ContainerUpState::try_from(notify.up_state)
-                                .map(CachedContainerUpState::from)
+                match self.get_pod_mut(&notify.id) {
+                    Some(pod) => {
+                        tracing::trace!("Got status notification for {}", notify.id);
+                        pod.data.up =
+                            match deimosproto::PodState::try_from(notify.state)
+                                .map(CachedPodState::from)
                             {
                                 Ok(up) => up.into(),
                                 Err(_) => {
                                     tracing::error!(
-                                        "Unknown up status {} received for container '{}'",
-                                        notify.up_state,
-                                        notify.container_id
+                                        "Unknown up status {} received for pod '{}'",
+                                        notify.state,
+                                        notify.id
                                     );
                                     return iced::Task::none();
                                 }
@@ -226,7 +226,7 @@ impl Context {
                         iced::Task::none()
                     }
                     None => {
-                        tracing::error!("Got status notification for unknown container '{}', attempting synchronization", notify.container_id);
+                        tracing::error!("Got status notification for unknown pod '{}', attempting synchronization", notify.id);
                         self.synchronize_from_server()
                     }
                 }
@@ -243,12 +243,12 @@ impl Context {
         iced::Task::future(async move {
             let mut api = api.lock().await;
             match api
-                .query_containers(deimosproto::QueryContainersRequest {})
+                .query_pods(deimosproto::QueryPodsRequest {})
                 .await
             {
                 Ok(resp) => ContextMessage::BeginSynchronizeFromQuery(resp.into_inner()),
                 Err(e) => {
-                    tracing::error!("Failed to query containers from server: {e}");
+                    tracing::error!("Failed to query pods from server: {e}");
                     ContextMessage::Error
                 }
             }
@@ -256,27 +256,27 @@ impl Context {
     }
 
     /// Change the given container's status on the server
-    pub fn update_container(
+    pub fn update_pod(
         &mut self,
-        container: ContainerRef,
-        run: CachedContainerUpState,
+        pod: PodRef,
+        run: CachedPodState,
     ) -> iced::Task<ContextMessage> {
-        let id = match self.containers.get_mut(container) {
-            Some(container) => {
-                container.data.up = CachedContainerUpStateFull::UpdateRequested {
-                    old: match container.data.up {
-                        CachedContainerUpStateFull::Known(s) => s,
-                        _ => CachedContainerUpState::Dead,
+        let id = match self.pods.get_mut(pod) {
+            Some(pod) => {
+                pod.data.up = CachedPodStateFull::UpdateRequested {
+                    old: match pod.data.up {
+                        CachedPodStateFull::Known(s) => s,
+                        _ => CachedPodState::Disabled,
                     },
                     req: run,
                 };
 
-                container.data.id.clone()
+                pod.data.id.clone()
             }
             None => {
                 tracing::warn!(
                     "Got update container message for unknown container '{:?}'",
-                    container
+                    pod
                 );
                 return iced::Task::none();
             }
@@ -287,15 +287,15 @@ impl Context {
         };
         iced::Task::future(async move {
             let mut api = api.lock().await;
-            let method: deimosproto::ContainerUpState = run.into();
+            let method: deimosproto::PodState = run.into();
             if let Err(e) = api
-                .update_container(deimosproto::UpdateContainerRequest {
+                .update_pod(deimosproto::UpdatePodRequest {
                     id: id.clone(),
                     method: method as i32,
                 })
                 .await
             {
-                tracing::error!("Failed to update container {}: {}", id, e);
+                tracing::error!("Failed to update pod {}: {}", id, e);
             }
         })
         .discard()
@@ -304,17 +304,13 @@ impl Context {
     /// Start synchronizing the local cache items from the given list of containers on the server
     fn begin_synchronize_from_query(
         &mut self,
-        resp: deimosproto::QueryContainersResponse,
+        resp: deimosproto::QueryPodsResponse,
     ) -> iced::Task<ContextMessage> {
-        let Some(api) = self.api.clone() else {
-            return iced::Task::none();
-        };
-
-        self.containers.retain(|_, exist| {
-            let present = resp.containers.iter().any(|c| c.id == exist.data.id);
+        self.pods.retain(|_, exist| {
+            let present = resp.pods.iter().any(|c| c.id == exist.data.id);
             if !present {
                 tracing::trace!(
-                    "Removing container {} - was not contained in server's response",
+                    "Removing pod {} - was not contained in server's response",
                     exist.data.id
                 );
             }
@@ -322,38 +318,38 @@ impl Context {
             present
         });
 
-        let tasks = resp.containers.into_iter().filter_map(|new| {
-            let up = match deimosproto::ContainerUpState::try_from(new.up_state)
-                .map(CachedContainerUpState::from)
+        let tasks = resp.pods.into_iter().filter_map(|new| {
+            let up = match deimosproto::PodState::try_from(new.state)
+                .map(CachedPodState::from)
             {
                 Ok(up) => up,
                 Err(_) => {
                     tracing::error!(
-                        "Failed to decode up status of container '{}', defaulting to dead",
+                        "Failed to decode up status of pod '{}', defaulting to dead",
                         new.id
                     );
-                    CachedContainerUpState::Dead
+                    CachedPodState::Disabled
                 }
             };
 
-            let data = CachedContainerData {
+            let data = CachedPodData {
                 id: new.id,
                 name: new.title,
                 up: up.into(),
             };
 
-            match self.get_container_mut(&data.id) {
+            match self.get_pod_mut(&data.id) {
                 Some(local) => {
                     local.data = data;
                     None
                 }
                 None => {
                     tracing::info!("Got new container {} from server", data.id);
-                    self.containers.insert(CachedContainer {
-                        data,
-                        banner: None,
-                        icon: None,
-                    });
+                    self.pods.insert(
+                        CachedPod {
+                            data,
+                        }
+                    );
                     None
                 }
             }

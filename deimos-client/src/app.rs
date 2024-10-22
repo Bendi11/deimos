@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use cview::{ContainerView, ContainerViewMessage};
+use cview::{PodView, PodViewMessage};
 use iced::{
     widget::{svg, Svg},
     Length, Task,
@@ -22,7 +22,7 @@ pub struct DeimosApplication {
     settings_icon: svg::Handle,
     sidebar: Sidebar,
     settings: Settings,
-    container_view: ContainerView,
+    pod_view: PodView,
     view: DeimosView,
 }
 
@@ -40,7 +40,7 @@ pub enum DeimosMessage {
     Context(ContextMessage),
     Settings(SettingsMessage),
     Sidebar(SidebarMessage),
-    ContainerView(ContainerViewMessage),
+    PodView(PodViewMessage),
 }
 
 impl DeimosApplication {
@@ -52,14 +52,14 @@ impl DeimosApplication {
         let settings_icon = svg::Handle::from_memory(include_bytes!("../assets/settings.svg"));
         let sidebar = Sidebar::new();
         let settings = Settings::new();
-        let container_view = ContainerView::new();
+        let container_view = PodView::new();
 
         Self {
             ctx,
             sidebar,
             settings,
             settings_icon,
-            container_view,
+            pod_view: container_view,
             view,
         }
     }
@@ -111,13 +111,13 @@ impl DeimosApplication {
                     .map(DeimosMessage::Context),
                 SidebarMessage::UpdateContainer(container, state) => self
                     .ctx
-                    .update_container(container, state)
+                    .update_pod(container, state)
                     .map(DeimosMessage::Context),
                 SidebarMessage::SelectContainer(container) => {
                     let task = self
-                        .container_view
-                        .update(&mut self.ctx, ContainerViewMessage::ChangeView(container))
-                        .map(DeimosMessage::ContainerView);
+                        .pod_view
+                        .update(&mut self.ctx, PodViewMessage::ChangeView(container))
+                        .map(DeimosMessage::PodView);
                     task.chain(iced::Task::done(DeimosMessage::Navigate(
                         DeimosView::ContainerView,
                     )))
@@ -127,10 +127,10 @@ impl DeimosApplication {
                     .update(&mut self.ctx, other)
                     .map(DeimosMessage::Sidebar),
             },
-            DeimosMessage::ContainerView(msg) => self
-                .container_view
+            DeimosMessage::PodView(msg) => self
+                .pod_view
                 .update(&mut self.ctx, msg)
-                .map(DeimosMessage::ContainerView),
+                .map(DeimosMessage::PodView),
         }
     }
 
@@ -158,9 +158,9 @@ impl DeimosApplication {
             .push(match self.view {
                 DeimosView::Settings => self.settings.view(&self.ctx).map(DeimosMessage::Settings),
                 DeimosView::ContainerView => self
-                    .container_view
+                    .pod_view
                     .view(&self.ctx)
-                    .map(DeimosMessage::ContainerView),
+                    .map(DeimosMessage::PodView),
                 _ => self.empty_view(),
             })
             .into()

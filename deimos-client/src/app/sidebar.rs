@@ -8,8 +8,8 @@ use iced::{
 };
 
 use crate::context::{
-    container::{CachedContainer, CachedContainerUpState, CachedContainerUpStateFull},
-    ContainerRef, Context,
+    pod::{CachedPod, CachedPodState, CachedPodStateFull},
+    PodRef, Context,
 };
 
 use super::{
@@ -28,8 +28,8 @@ pub struct Sidebar {
 #[derive(Debug, Clone)]
 pub enum SidebarMessage {
     Refresh,
-    SelectContainer(ContainerRef),
-    UpdateContainer(ContainerRef, CachedContainerUpState),
+    SelectContainer(PodRef),
+    UpdateContainer(PodRef, CachedPodState),
 }
 
 impl Sidebar {
@@ -84,7 +84,7 @@ impl Sidebar {
             .spacing(16)
             .padding(Padding::default().left(10f32).right(10f32));
 
-        for (r, container) in ctx.containers.iter() {
+        for (r, container) in ctx.pods.iter() {
             containers = containers.push(self.container_button(r, container));
         }
 
@@ -118,34 +118,32 @@ impl Sidebar {
 
     fn container_button<'a>(
         &self,
-        r: ContainerRef,
-        container: &'a CachedContainer,
+        r: PodRef,
+        container: &'a CachedPod,
     ) -> Element<'a, SidebarMessage> {
         let (msg, svg) = match container.data.up {
-            CachedContainerUpStateFull::Known(ref state) => match state {
-                CachedContainerUpState::Dead => (
-                    Some(SidebarMessage::UpdateContainer(
-                        r,
-                        CachedContainerUpState::Running,
-                    )),
-                    Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
-                ),
-                CachedContainerUpState::Paused => (
-                    Some(SidebarMessage::UpdateContainer(
-                        r,
-                        CachedContainerUpState::Running,
-                    )),
-                    Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
-                ),
-                CachedContainerUpState::Running => (
-                    Some(SidebarMessage::UpdateContainer(
-                        r,
-                        CachedContainerUpState::Dead,
-                    )),
-                    Svg::new(self.stop.clone()).class(orbit::MARS[1]),
-                ),
-            },
-            CachedContainerUpStateFull::UpdateRequested { .. } => {
+            CachedPodStateFull::Known(CachedPodState::Disabled) => (
+                Some(SidebarMessage::UpdateContainer(
+                    r,
+                    CachedPodState::Enabled,
+                )),
+                Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
+            ),
+            CachedPodStateFull::Known(CachedPodState::Paused) => (
+                Some(SidebarMessage::UpdateContainer(
+                    r,
+                    CachedPodState::Enabled,
+                )),
+                Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
+            ),
+            CachedPodStateFull::Known(CachedPodState::Enabled) => (
+                Some(SidebarMessage::UpdateContainer(
+                    r,
+                    CachedPodState::Disabled,
+                )),
+                Svg::new(self.stop.clone()).class(orbit::MARS[1]),
+            ),
+            CachedPodStateFull::Known(CachedPodState::Transit) | CachedPodStateFull::UpdateRequested { .. } => {
                 (None, Svg::new(self.reload.clone()).class(orbit::EARTH[2]))
             }
         };

@@ -6,59 +6,53 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use deimosproto::DeimosServiceClient;
-use iced::widget::image;
-use mime::Mime;
-use tokio::sync::Mutex;
-use tonic::transport::Channel;
 
 use super::Context;
 
 /// Data received from a server about a single container, cached locally.
 /// Contains iced handles for resources used to display the container.
 #[derive(Debug, Clone)]
-pub struct CachedContainer {
-    pub data: CachedContainerData,
-    pub banner: Option<image::Handle>,
-    pub icon: Option<image::Handle>,
+pub struct CachedPod {
+    pub data: CachedPodData,
 }
 
 /// Data to be serialized in a local cache file for a container
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CachedContainerData {
+pub struct CachedPodData {
     pub id: String,
     pub name: String,
-    pub up: CachedContainerUpStateFull,
+    pub up: CachedPodStateFull,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub enum CachedContainerUpState {
-    Dead,
+pub enum CachedPodState {
+    Disabled,
+    Transit,
     Paused,
-    Running,
+    Enabled,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub enum CachedContainerUpStateFull {
-    Known(CachedContainerUpState),
+pub enum CachedPodStateFull {
+    Known(CachedPodState),
     UpdateRequested {
-        old: CachedContainerUpState,
-        req: CachedContainerUpState,
+        old: CachedPodState,
+        req: CachedPodState,
     },
 }
 
 impl Context {
-    /// Save all cached container state to the local cache directory
-    pub fn save_cached_containers(&self) {
-        for container in self.containers.values() {
+    /// Save all cached pod state to the local cache directory
+    pub fn save_cached_pods(&self) {
+        for container in self.pods.values() {
             if let Err(e) = container.save(&self.cache_dir) {
                 tracing::error!("Failed to save container {}: {}", container.data.id, e);
             }
         }
     }
 
-    /// Attempt to load all containers from the given local cache directory
-    pub(super) async fn load_cached_containers(cache_dir: PathBuf) -> Vec<CachedContainer> {
+    /// Attempt to load all pods from the given local cache directory
+    pub(super) async fn load_cached_pods(cache_dir: PathBuf) -> Vec<CachedPod> {
         if !cache_dir.exists() {
             if let Err(e) = tokio::fs::create_dir(&cache_dir).await {
                 tracing::error!(
@@ -73,7 +67,7 @@ impl Context {
             Ok(r) => r,
             Err(e) => {
                 tracing::error!(
-                    "Failed to load cached containers from {}: {}",
+                    "Failed to read cached pods directory {}: {}",
                     cache_dir.display(),
                     e
                 );
@@ -81,7 +75,7 @@ impl Context {
             }
         };
 
-        let mut containers = Vec::new();
+        let mut pods = Vec::new();
 
         loop {
             let entry = match iter.next_entry().await {
@@ -100,13 +94,13 @@ impl Context {
             match entry.file_type().await {
                 Ok(ft) if ft.is_dir() => {
                     let path = entry.path();
-                    let meta = match CachedContainerData::load(&path).await {
+                    let meta = match CachedPodData::load(&path).await {
                         Ok(container) => container,
                         Err(e) => {
-                            tracing::error!("Failed to load cached container {}: {} - it will be deleted and re-synchronized", path.display(), e);
+                            tracing::error!("Failed to load cached pod {}: {} - it will be deleted and re-synchronized", path.display(), e);
                             if let Err(e) = tokio::fs::remove_dir(path.clone()).await {
                                 tracing::error!(
-                                    "Failed to delete erroneous cached container directory {}: {}",
+                                    "Failed to delete erroneous cached pod directory {}: {}",
                                     path.display(),
                                     e
                                 );
@@ -115,8 +109,8 @@ impl Context {
                         }
                     };
 
-                    let full = CachedContainer::load(meta, &path).await;
-                    containers.push(full)
+                    let full = CachedPod::load(meta, &path).await;
+                    pods.push(full)
                 }
                 Ok(_) => (),
                 Err(e) => {
@@ -129,36 +123,36 @@ impl Context {
             }
         }
 
-        containers
+        pods
     }
 }
 
-impl CachedContainerData {
+impl CachedPodData {
     /// Load only the cached metadata for a cached container, without loading large images yet
-    async fn load(directory: &Path) -> Result<Self, CachedContainerLoadError> {
-        let meta_path = directory.join(CachedContainer::METADATA_FILE);
+    async fn load(directory: &Path) -> Result<Self, CachedPodLoadError> {
+        let meta_path = directory.join(CachedPod::METADATA_FILE);
         let data_str = tokio::fs::read_to_string(&meta_path).await.map_err(|err| {
-            CachedContainerLoadError::IO {
+            CachedPodLoadError::IO {
                 path: meta_path,
                 err,
             }
         })?;
-        serde_json::from_str::<CachedContainerData>(&data_str).map_err(Into::into)
+        serde_json::from_str::<CachedPodData>(&data_str).map_err(Into::into)
     }
 
     /// Write cached container metadata to a local cache directory
-    fn save(&self, directory: &Path) -> Result<(), CachedContainerSaveError> {
-        let meta_path = directory.join(CachedContainer::METADATA_FILE);
+    fn save(&self, directory: &Path) -> Result<(), CachedPodSaveError> {
+        let meta_path = directory.join(CachedPod::METADATA_FILE);
 
         let mut file =
-            std::fs::File::create(&meta_path).map_err(|err| CachedContainerSaveError::IO {
+            std::fs::File::create(&meta_path).map_err(|err| CachedPodSaveError::IO {
                 path: meta_path.clone(),
                 err,
             })?;
 
         let bytes = serde_json::to_vec(self)?;
         file.write_all(&bytes)
-            .map_err(|err| CachedContainerSaveError::IO {
+            .map_err(|err| CachedPodSaveError::IO {
                 path: meta_path,
                 err,
             })?;
@@ -167,55 +161,34 @@ impl CachedContainerData {
     }
 }
 
-impl CachedContainer {
+impl CachedPod {
     const METADATA_FILE: &str = "meta.json";
     const BANNER_FILENAME: &str = "banner";
     const ICON_FILENAME: &str = "icon";
 
-    /// Check if the image with the given MIME type received from the server is supported by the
-    /// frontend
-    fn supported_image_mime(kind: Mime) -> bool {
-        kind == mime::IMAGE_JPEG || kind == mime::IMAGE_PNG || kind == mime::IMAGE_BMP
-    }
-
     /// Load a cached container from a local cache directory
-    async fn load(data: CachedContainerData, directory: &Path) -> Self {
+    async fn load(data: CachedPodData, directory: &Path) -> Self {
         tracing::trace!("Loading cached container from {}", directory.display());
 
-        let banner = Self::load_image(directory.join(Self::BANNER_FILENAME)).await;
-        let icon = Self::load_image(directory.join(Self::ICON_FILENAME)).await;
-
-        Self { data, banner, icon }
+        Self { data }
     }
 
     /// Save all state to the filesystem, creating cache directories as required
-    fn save(&self, cache_dir: &Path) -> Result<(), CachedContainerSaveError> {
+    fn save(&self, cache_dir: &Path) -> Result<(), CachedPodSaveError> {
         let dir = self.directory(cache_dir);
         if let Err(e) = std::fs::create_dir(&dir) {
             tracing::warn!(
-                "Failed to create directory '{}' for container {}: {}",
+                "Failed to create directory '{}' for pod {}: {}",
                 dir.display(),
                 self.data.id,
                 e
             );
         }
 
-        tracing::trace!("Saving container {} to {}", self.data.id, dir.display());
+        tracing::trace!("Saving pod {} to {}", self.data.id, dir.display());
         self.data.save(&dir)?;
 
         Ok(())
-    }
-
-    /// Load an image, ignoring errors if it was not found and reporting them as warnings otherwise
-    async fn load_image(from: PathBuf) -> Option<image::Handle> {
-        match tokio::fs::read(&from).await {
-            Ok(bytes) => Some(image::Handle::from_bytes(bytes)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => {
-                tracing::warn!("Failed to load image file '{}': {}. Should get replaced next container synchronization", from.display(), e);
-                None
-            }
-        }
     }
 
     /// Get the directory that cache files for this container should be placed into
@@ -224,52 +197,54 @@ impl CachedContainer {
     }
 }
 
-impl From<deimosproto::ContainerUpState> for CachedContainerUpState {
-    fn from(value: deimosproto::ContainerUpState) -> Self {
+impl From<deimosproto::PodState> for CachedPodState {
+    fn from(value: deimosproto::PodState) -> Self {
         match value {
-            deimosproto::ContainerUpState::Dead => Self::Dead,
-            deimosproto::ContainerUpState::Paused => Self::Paused,
-            deimosproto::ContainerUpState::Running => Self::Running,
+            deimosproto::PodState::Disabled => Self::Disabled,
+            deimosproto::PodState::Transit => Self::Transit,
+            deimosproto::PodState::Paused => Self::Paused,
+            deimosproto::PodState::Enabled => Self::Enabled,
         }
     }
 }
 
-impl From<CachedContainerUpState> for deimosproto::ContainerUpState {
-    fn from(val: CachedContainerUpState) -> Self {
+impl From<CachedPodState> for deimosproto::PodState {
+    fn from(val: CachedPodState) -> Self {
         match val {
-            CachedContainerUpState::Dead => deimosproto::ContainerUpState::Dead,
-            CachedContainerUpState::Paused => deimosproto::ContainerUpState::Paused,
-            CachedContainerUpState::Running => deimosproto::ContainerUpState::Running,
+            CachedPodState::Transit => deimosproto::PodState::Transit,
+            CachedPodState::Disabled => deimosproto::PodState::Disabled,
+            CachedPodState::Paused => deimosproto::PodState::Paused,
+            CachedPodState::Enabled => deimosproto::PodState::Enabled,
         }
     }
 }
 
-impl From<CachedContainerUpState> for CachedContainerUpStateFull {
-    fn from(value: CachedContainerUpState) -> Self {
+impl From<CachedPodState> for CachedPodStateFull {
+    fn from(value: CachedPodState) -> Self {
         Self::Known(value)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum CachedContainerLoadError {
+pub enum CachedPodLoadError {
     #[error("I/O operation on file {}: {}", path.display(), err)]
     IO {
         path: PathBuf,
         #[source]
         err: std::io::Error,
     },
-    #[error("Failed to parse cached container state: {0}")]
+    #[error("Failed to parse cached pod state: {0}")]
     Decode(#[from] serde_json::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum CachedContainerSaveError {
+pub enum CachedPodSaveError {
     #[error("I/O operation on file {}: {}", path.display(), err)]
     IO {
         path: PathBuf,
         #[source]
         err: std::io::Error,
     },
-    #[error("Failed to serialize container state: {0}")]
+    #[error("Failed to serialize pod state: {0}")]
     Encode(#[from] serde_json::Error),
 }
