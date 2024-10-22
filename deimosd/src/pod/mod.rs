@@ -1,8 +1,8 @@
-use std::{ops::Deref, path::{Path, PathBuf}};
+use std::path::{Path, PathBuf};
 
 use config::PodConfig;
 use id::{DeimosId, DockerId};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 
 
 pub mod config;
@@ -97,8 +97,8 @@ impl Pod {
 
 impl PodStateHandle {
     fn new(state: PodStateKnown) -> Self {
+        let (tx, _) = tokio::sync::watch::channel(PodState::from(&state));
         let lock = Mutex::new(state);
-        let (tx, _) = tokio::sync::watch::channel(4);
 
         Self {
             lock,

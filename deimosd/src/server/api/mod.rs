@@ -9,7 +9,9 @@ use tonic::transport::Identity;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use zeroize::Zeroize;
 
-use crate::pod::{Pod, PodState, PodStateReadHandle};
+use crate::pod::id::DeimosId;
+use crate::pod::manager::PodStateStream;
+use crate::pod::{Pod, PodState};
 
 use super::upnp::{Upnp, UpnpLease, UpnpLeaseData};
 use super::Deimos;
@@ -99,13 +101,15 @@ impl Deimos {
     fn lookup_pod(&self, id: String) -> Result<Arc<Pod>, tonic::Status> {
         self.pods.get(&id).ok_or_else(|| tonic::Status::not_found(id))
     }
+}
 
-    fn pod_state_to_api(state: PodStateReadHandle) -> proto::PodState {
-        match *state {
+impl From<PodState> for proto::PodState {
+    fn from(value: PodState) -> Self {
+        match value {
             PodState::Disabled => proto::PodState::Disabled,
-            PodState::Transit => proto::PodState::Progress,
-            PodState::Paused{..} => proto::PodState::Paused,
-            PodState::Enabled{..} => proto::PodState::Enabled,
+            PodState::Transit => proto::PodState::Transit,
+            PodState::Paused => proto::PodState::Paused,
+            PodState::Enabled => proto::PodState::Enabled,
         }
     }
 }
@@ -113,7 +117,7 @@ impl Deimos {
 
 #[async_trait]
 impl proto::DeimosService for Deimos {
-    fn query_pods(self: Arc<Self>, _: tonic::Request<proto::QueryPodsRequest>) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
+    async fn query_pods(self: Arc<Self>, _: tonic::Request<proto::QueryPodsRequest>) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
         let pods = self
             .pods
             .iter()
@@ -122,7 +126,7 @@ impl proto::DeimosService for Deimos {
                     proto::PodBrief {
                         id: pod.id().owned(),
                         title: pod.title().to_owned(),
-                        state: Self::pod_state_to_api(pod.state()) as i32
+                        state: proto::PodState::from(pod.state()) as i32
                     }
             )
             .collect::<Vec<_>>();
@@ -136,7 +140,7 @@ impl proto::DeimosService for Deimos {
         )
     }
 
-    fn update_pod(self: Arc<Self>, req: tonic::Request<proto::UpdatePodRequest>) -> Result<tonic::Response<proto::UpdatePodResponse>, tonic::Status> {
+   async fn update_pod(self: Arc<Self>, req: tonic::Request<proto::UpdatePodRequest>) -> Result<tonic::Response<proto::UpdatePodResponse>, tonic::Status> {
         let req = req.into_inner();
         let pod = self.lookup_pod(req.id)?;
         let id = pod.id();
@@ -178,10 +182,24 @@ impl proto::DeimosService for Deimos {
         )
     }
 
-    type SubscribePodStatusStream = ();
+    type SubscribePodStatusStream = futures::stream::Map<
+        PodStateStream,
+        Box<dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status> + Send + Sync>
+    >;
 
-    fn subscribe_pod_status(self: Arc<Self>, req: tonic::Request<proto::PodStatusStreamRequest>) -> Result<Self::SubscribePodStatusStream, tonic::Status> {
-        unimplemented!("")
+    async fn subscribe_pod_status(self: Arc<Self>, _: tonic::Request<proto::PodStatusStreamRequest>) -> Result<tonic::Response<Self::SubscribePodStatusStream>, tonic::Status> {
+        let stream = self
+            .pods
+            .stream()
+            .map(
+                Box::<dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status> + Send + Sync>::from(
+                    Box::new(move |(id, state)| Ok(proto::PodStatusNotification { id: id.owned(), state: proto::PodState::from(state) as i32 }))
+                )
+            );
+
+        Ok(
+            tonic::Response::new(stream)
+        )
     }
 }
 

@@ -1,8 +1,10 @@
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::Arc, time::Duration};
+use std::{collections::HashMap, future::Future, path::{Path, PathBuf}, sync::Arc, time::Duration};
 
 use bollard::Docker;
+use futures::{future::BoxFuture, stream::{FuturesUnordered, SelectAll}, Stream, StreamExt};
+use tokio_util::sync::ReusableBoxFuture;
 
-use super::{id::DeimosId, Pod};
+use super::{id::DeimosId, Pod, PodState};
 
 mod config;
 
@@ -15,6 +17,14 @@ pub struct PodManager {
     pub(super) docker: Docker,
     pods: HashMap<DeimosId, Arc<Pod>>,
 }
+
+
+pub type PodStateStream = SelectAll<
+    futures::stream::Map<
+        tokio_stream::wrappers::WatchStream<PodState>,
+        Box<dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync>,
+    >
+>;
 
 impl PodManager {
     /// Load a config TOML file from the given path, and use the options specified inside to
@@ -42,6 +52,25 @@ impl PodManager {
                 pods,
             }
         )
+    }
+    
+    /// Get a stream of state changes made to containers, with their associated ID
+    pub fn stream(&self) -> PodStateStream {
+        let iter = self
+            .pods
+            .values()
+            .cloned()
+            .map(|pod| {
+                let id = pod.id();
+                tokio_stream::wrappers::WatchStream::new(pod.state.tx.subscribe())
+                    .map(
+                        Box::<dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync>::from(
+                            Box::new(move |state| (id.clone(), state))
+                        )
+                    )
+            });
+
+        futures::stream::select_all(iter)
     }
     
     /// Get a reference to the pod with the given ID
@@ -105,6 +134,7 @@ impl<'a> IntoIterator for &'a PodManager {
         (&self.pods).into_iter()
     }
 }
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum PodManagerInitError {

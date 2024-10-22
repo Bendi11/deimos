@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::pod::{config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodEnable, PodState};
+use crate::pod::{config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodEnable, PodStateKnown};
 
 
 impl PodManager {
@@ -8,11 +8,11 @@ impl PodManager {
     /// Creates and starts Docker container as required based on the current state of the pod.
     /// If the pod is already enabled, this is a no-op.
     pub async fn enable(&self, pod: Arc<Pod>) -> Result<(), PodEnableError> {
-        let mut lock = pod.state.lock().await;
-        let docker_id = match *lock {
-            PodState::Enabled(..) => return Ok(()),
-            PodState::Paused(ref paused) => paused.docker_id.clone(),
-            PodState::Disabled => {
+        let mut lock = pod.state_lock().await;
+        let docker_id = match lock.state() {
+            PodStateKnown::Enabled(..) => return Ok(()),
+            PodStateKnown::Paused(ref paused) => paused.docker_id.clone(),
+            PodStateKnown::Disabled => {
                 let container = self.create_container(&pod).await?;
                 if let Err(e) = self.start_container(&container).await {
                     tracing::warn!("Container for pod {} failed to start, destroying it", pod.id());
@@ -27,10 +27,12 @@ impl PodManager {
             },
         };
         
-        *lock = PodState::Enabled(
-            PodEnable {
-                docker_id,
-            }
+        lock.set(
+            PodStateKnown::Enabled(
+                PodEnable {
+                    docker_id,
+                }
+            )
         );
 
         Ok(())
