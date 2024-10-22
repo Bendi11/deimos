@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use iced::{
     alignment::{Horizontal, Vertical},
     border::Radius,
@@ -12,10 +10,7 @@ use crate::context::{
     Context, PodRef,
 };
 
-use super::{
-    style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text},
-    DeimosMessage,
-};
+use super::style::{container::ContainerClass, orbit, Button, Column, Container, Element, Row, Svg, Text};
 
 #[derive(Debug)]
 pub struct Sidebar {

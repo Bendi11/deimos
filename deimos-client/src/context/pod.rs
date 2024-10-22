@@ -98,7 +98,7 @@ impl Context {
                         Ok(container) => container,
                         Err(e) => {
                             tracing::error!("Failed to load cached pod {}: {} - it will be deleted and re-synchronized", path.display(), e);
-                            if let Err(e) = tokio::fs::remove_dir(path.clone()).await {
+                            if let Err(e) = tokio::fs::remove_dir_all(path.clone()).await {
                                 tracing::error!(
                                     "Failed to delete erroneous cached pod directory {}: {}",
                                     path.display(),
