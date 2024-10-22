@@ -8,5 +8,5 @@ message PodStatusStreamRequest {}
 
 message PodStatusNotification {
     string id = 1;
-    PodState up_state = 2;
+    PodState state = 2;
 }

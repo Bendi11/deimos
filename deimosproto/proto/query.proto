@@ -7,5 +7,5 @@ import "pod.proto";
 message QueryPodsRequest {}
 
 message QueryPodsResponse {
-    repeated PodBrief containers = 1;
+    repeated PodBrief pods = 1;
 }

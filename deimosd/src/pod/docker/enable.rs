@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::pod::{config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodRun, PodState};
+use crate::pod::{config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodEnable, PodState};
 
 
 impl PodManager {
@@ -28,7 +28,7 @@ impl PodManager {
         };
         
         *lock = PodState::Enabled(
-            PodRun {
+            PodEnable {
                 docker_id,
             }
         );

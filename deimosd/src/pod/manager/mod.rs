@@ -44,6 +44,11 @@ impl PodManager {
         )
     }
     
+    /// Get a reference to the pod with the given ID
+    pub fn get(&self, id: &str) -> Option<Arc<Pod>> {
+        self.pods.get(id).cloned()
+    }
+    
     /// Load all containers from directory entries in the given containers directory,
     /// logging errors and ignoring on failure
     async fn load_containers(dir: &Path) -> Result<HashMap<DeimosId, Arc<Pod>>, PodManagerInitError> {
@@ -84,6 +89,20 @@ impl PodManager {
         }
 
         Ok(pods)
+    }
+    
+    /// Get an immutable iterator over references to the managed pods
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a DeimosId, &'a Arc<Pod>)> {
+        self.pods.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a PodManager {
+    type Item = (&'a DeimosId, &'a Arc<Pod>);
+    type IntoIter = std::collections::hash_map::Iter<'a, DeimosId, Arc<Pod>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.pods).into_iter()
     }
 }
 

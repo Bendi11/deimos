@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::{ops::Deref, path::{Path, PathBuf}};
 
 use config::PodConfig;
 use id::{DeimosId, DockerId};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 
 pub mod config;
@@ -14,17 +14,37 @@ pub mod manager;
 /// Represents a single pod with associated config and running Docker container if any exists
 pub struct Pod {
     config: PodConfig,
-    state: Mutex<PodState>,
+    state: PodStateHandle,
 }
 
-/// Current state of a pod
-enum PodState {
+pub struct PodStateHandle {
+    lock: Mutex<PodStateKnown>,
+    tx: tokio::sync::watch::Sender<PodState>,
+}
+
+/// A handle allowing mutations to the state of a [Pod]
+pub struct PodStateWriteHandle<'a> {
+    lock: tokio::sync::MutexGuard<'a, PodStateKnown>,
+    tx: tokio::sync::watch::Sender<PodState>,
+}
+
+/// Current state of a pod - including if the state is currently unknown and being modified
+#[derive(Debug, Clone, Copy)]
+pub enum PodState {
+    Disabled,
+    Transit,
+    Paused,
+    Enabled
+}
+
+/// State of a pod with the guarantee that the state is always known
+pub enum PodStateKnown {
     Disabled,
     Paused(PodPaused),
-    Enabled(PodRun),
+    Enabled(PodEnable)
 }
 
-pub struct PodRun {
+pub struct PodEnable {
     pub docker_id: DockerId,
 }
 
@@ -43,6 +63,17 @@ impl Pod {
         self.config.id.clone()
     }
     
+    /// Get an immutable reference to the current state
+    pub fn state(&self) -> PodState {
+        self.state.current()
+    }
+    
+    /// Wait until other mutable accesses to the current state have finished, then acquire a lock
+    /// and return
+    pub async fn state_lock(&self) -> PodStateWriteHandle {
+        self.state.lock().await
+    }
+    
     /// Load the pod from config files located in the given directory
     async fn load(dir: &Path) -> Result<Self, PodLoadError> {
         const CONFIG_FILENAME: &str = "pod.toml";
@@ -53,8 +84,7 @@ impl Pod {
             .map_err(|err| PodLoadError::ConfigRead { path, err })?;
 
         let config = toml::from_str(&config_str)?;
-
-        let state = Mutex::new(PodState::Disabled);
+        let state = PodStateHandle::new(PodStateKnown::Disabled);
 
         Ok(
             Self {
@@ -62,6 +92,59 @@ impl Pod {
                 state,
             }
         )
+    }
+}
+
+impl PodStateHandle {
+    fn new(state: PodStateKnown) -> Self {
+        let lock = Mutex::new(state);
+        let (tx, _) = tokio::sync::watch::channel(4);
+
+        Self {
+            lock,
+            tx,
+        }
+    }
+
+    /// Lock the handle to allow mutations to the current state
+    pub async fn lock(&self) -> PodStateWriteHandle {
+        PodStateWriteHandle {
+            lock: self.lock.lock().await,
+            tx: self.tx.clone(),
+        }
+    }
+    
+    /// Get the current state
+    pub fn current(&self) -> PodState {
+        self
+            .lock
+            .try_lock()
+            .as_deref()
+            .map(Into::into)
+            .unwrap_or(PodState::Transit)
+    }
+}
+
+impl From<&PodStateKnown> for PodState {
+    fn from(value: &PodStateKnown) -> Self {
+        match value {
+            PodStateKnown::Disabled => PodState::Disabled,
+            PodStateKnown::Paused(..) => PodState::Paused,
+            PodStateKnown::Enabled(..) => PodState::Enabled,
+        }
+    }
+}
+
+impl<'a> PodStateWriteHandle<'a> {
+    /// Get an immutable reference to the current state
+    pub fn state(&self) -> &PodStateKnown {
+        &self.lock
+    }
+    
+    /// Set the current state to the given value
+    pub fn set(&mut self, state: PodStateKnown) {
+        self.tx.send_replace((&state).into());
+        *self.lock = state;
     }
 }
 

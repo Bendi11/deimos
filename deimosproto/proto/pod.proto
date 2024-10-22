@@ -6,6 +6,7 @@ enum PodState {
     DISABLED = 0;
     PAUSED   = 1;
     ENABLED  = 2;
+    TRANSIT  = 3;
 }
 
 // Brief description of a container to inform clients of the existence and/or updates to managed containers

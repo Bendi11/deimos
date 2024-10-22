@@ -3,15 +3,18 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use futures::StreamExt;
 use igd_next::PortMappingProtocol;
+use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Identity;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use zeroize::Zeroize;
 
+use crate::pod::{Pod, PodState, PodStateReadHandle};
+
 use super::upnp::{Upnp, UpnpLease, UpnpLeaseData};
 use super::Deimos;
 
-use deimosproto as proto;
+use deimosproto::{self as proto};
 
 /// State required exclusively for the gRPC server including UPnP port leases.
 pub struct ApiState {
@@ -90,17 +93,89 @@ impl Deimos {
             }
         }
     }
+    
+    /// Get a pod by the ID as received from a client, and map not found to a [tonic::Status]
+    /// indicating the error
+    fn lookup_pod(&self, id: String) -> Result<Arc<Pod>, tonic::Status> {
+        self.pods.get(&id).ok_or_else(|| tonic::Status::not_found(id))
+    }
+
+    fn pod_state_to_api(state: PodStateReadHandle) -> proto::PodState {
+        match *state {
+            PodState::Disabled => proto::PodState::Disabled,
+            PodState::Transit => proto::PodState::Progress,
+            PodState::Paused{..} => proto::PodState::Paused,
+            PodState::Enabled{..} => proto::PodState::Enabled,
+        }
+    }
 }
 
 
 #[async_trait]
 impl proto::DeimosService for Deimos {
-    fn query_pods(self: Arc<Self>, req: tonic::Request<proto::QueryPodsRequest>) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
-        unimplemented!("")
+    fn query_pods(self: Arc<Self>, _: tonic::Request<proto::QueryPodsRequest>) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
+        let pods = self
+            .pods
+            .iter()
+            .map(
+                |(_, pod)|
+                    proto::PodBrief {
+                        id: pod.id().owned(),
+                        title: pod.title().to_owned(),
+                        state: Self::pod_state_to_api(pod.state()) as i32
+                    }
+            )
+            .collect::<Vec<_>>();
+
+        Ok(
+            tonic::Response::new(
+                proto::QueryPodsResponse {
+                    pods
+                }
+            )
+        )
     }
 
     fn update_pod(self: Arc<Self>, req: tonic::Request<proto::UpdatePodRequest>) -> Result<tonic::Response<proto::UpdatePodResponse>, tonic::Status> {
-        unimplemented!("")
+        let req = req.into_inner();
+        let pod = self.lookup_pod(req.id)?;
+        let id = pod.id();
+
+        match proto::PodState::try_from(req.method) {
+            Ok(proto::PodState::Disabled) => tokio::task::spawn(
+                async move {
+                    if let Err(e) = self.pods.disable(pod).await {
+                        tracing::error!("Failed ot disable pod {} in response to API request: {}", id, e);
+                    }
+                }
+            ),
+            Ok(proto::PodState::Enabled) => tokio::task::spawn(
+                async move {
+                    if let Err(e) = self.pods.enable(pod).await {
+                        tracing::error!("Failed to enable pod {} in response to API request: {}", id, e);
+                    }
+                }
+            ),
+            Ok(proto::PodState::Paused) => tokio::task::spawn(
+                async move {
+                    if let Err(e) = self.pods.pause(pod).await {
+                        tracing::error!("Failed to puase pod {} in response to API request: {}", id, e);
+                    }
+                }
+            ),
+            Ok(proto::PodState::Transit) => return Err(
+                tonic::Status::invalid_argument(String::from("Cannot set pod to reserved state Transit"))
+            ),
+            Err(_) => return Err(
+                tonic::Status::invalid_argument(format!("Unknown pod state enumeration value {}", req.method))
+            )
+        };
+
+        Ok(
+            tonic::Response::new(
+                proto::UpdatePodResponse {}
+            )
+        )
     }
 
     type SubscribePodStatusStream = ();

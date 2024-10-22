@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::pod::{id::DockerId, manager::PodManager, Pod, PodState};
+use crate::pod::{id::DockerId, manager::PodManager, Pod, PodState, PodStateKnown};
 
 
 
@@ -8,11 +8,11 @@ impl PodManager {
     /// Top-level operation to disable the given pod.
     /// Gracefully, then forcefully stops and removes the Docker container as required.
     pub async fn disable(&self, pod: Arc<Pod>) -> Result<(), PodDisableError> {
-        let mut lock = pod.state.lock().await;
-        let docker_id = match *lock {
-            PodState::Disabled => return Ok(()),
-            PodState::Paused(ref paused) => paused.docker_id.clone(),
-            PodState::Enabled(ref running) => {
+        let mut lock = pod.state_lock().await;
+        let docker_id = match lock.take() {
+            PodStateKnown::Disabled => return Ok(()),
+            PodStateKnown::Paused(ref paused) => paused.docker_id.clone(),
+            PodStateKnown::Enabled(ref running) => {
                 self.stop_container(&running.docker_id, pod.config.docker.stop_timeout).await?;
                 running.docker_id.clone()
             }
