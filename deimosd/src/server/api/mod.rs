@@ -1,6 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::StreamExt;
 use igd_next::PortMappingProtocol;
 use tokio::sync::{Mutex, RwLock};
@@ -9,6 +10,7 @@ use tonic::transport::Identity;
 use tonic::transport::{Certificate, Server, ServerTlsConfig};
 use zeroize::Zeroize;
 
+use crate::pod::docker::logs::PodLogStream;
 use crate::pod::id::DeimosId;
 use crate::pod::manager::PodStateStream;
 use crate::pod::{Pod, PodState};
@@ -212,7 +214,39 @@ impl proto::DeimosService for Deimos {
 
         Ok(tonic::Response::new(stream))
     }
+
+    type SubscribePodLogsStream = futures::stream::Map<
+        PodLogStream,
+        Box<PodLogApiMapper>
+    >;
+
+    async fn subscribe_pod_logs(self: Arc<Self>, req: tonic::Request<proto::PodLogStreamRequest>) -> Result<tonic::Response<Self::SubscribePodLogsStream>, tonic::Status> {
+        let pod = self.lookup_pod(req.into_inner().id)?;
+        self
+            .pods
+            .subscribe_logs(pod)
+            .await
+            .map_err(|e| tonic::Status::failed_precondition(e.to_string()))
+            .map(|sub|
+                tonic::Response::new(
+                    sub
+                        .map(
+                            Box::<PodLogApiMapper>::from(
+                                Box::new(|bytes: Bytes|
+                                    Ok(
+                                        proto::PodLogChunk {
+                                            chunk: bytes.to_vec()
+                                        }
+                                    )
+                                )
+                            )
+                        )
+                )
+            )
+    }
 }
+
+type PodLogApiMapper = dyn FnMut(Bytes) -> Result<proto::PodLogChunk, tonic::Status> + Send + Sync;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiInitError {

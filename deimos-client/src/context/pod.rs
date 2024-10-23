@@ -1,11 +1,7 @@
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    str::FromStr,
-    sync::Arc,
 };
-
-use chrono::{DateTime, Utc};
 
 use super::Context;
 
@@ -163,8 +159,6 @@ impl CachedPodData {
 
 impl CachedPod {
     const METADATA_FILE: &str = "meta.json";
-    const BANNER_FILENAME: &str = "banner";
-    const ICON_FILENAME: &str = "icon";
 
     /// Load a cached container from a local cache directory
     async fn load(data: CachedPodData, directory: &Path) -> Self {

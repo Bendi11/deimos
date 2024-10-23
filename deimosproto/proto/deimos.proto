@@ -11,8 +11,10 @@ import public "update.proto";
 service DeimosService {
     // List brief descriptions of all containers managed by the server
     rpc QueryPods(QueryPodsRequest) returns(QueryPodsResponse);
-    
+    // Subscribe to status notifications for all containers
     rpc SubscribePodStatus(PodStatusStreamRequest) returns(stream PodStatusNotification);
-
+    // Update the given pod - used to enable and disable containers
     rpc UpdatePod(UpdatePodRequest) returns(UpdatePodResponse);
+    // Subscribe to new log lines for the given container
+    rpc SubscribePodLogs(PodLogStreamRequest) returns(stream PodLogChunk);
 }

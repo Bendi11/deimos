@@ -10,3 +10,11 @@ message PodStatusNotification {
     string id = 1;
     PodState state = 2;
 }
+
+message PodLogChunk {
+    bytes chunk = 1;
+}
+
+message PodLogStreamRequest {
+    string id = 1;
+}
