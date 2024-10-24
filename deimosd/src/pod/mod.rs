@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    future::Future,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -8,9 +7,8 @@ use std::{
 
 use bollard::Docker;
 use futures::{
-    future::BoxFuture,
-    stream::{FuturesUnordered, SelectAll},
-    Stream, StreamExt,
+    stream::SelectAll,
+    StreamExt,
 };
 use id::DeimosId;
 
@@ -22,15 +20,15 @@ pub mod config;
 pub mod state;
 
 pub use state::{Pod,  PodState, PodStateKnown};
-pub use config::{DockerConnectionConfig, DockerConnectionType, PodManagerConfig, PodConfig};
+pub use config::{DockerConnectionConfig, DockerConnectionType, PodManagerConfig};
 
 /// Manager responsible for orchestrating Docker containers and watching for external events and
 /// failures
 pub struct PodManager {
     config: PodManagerConfig,
-    pub(super) docker: Docker,
-    pub(super) upnp: Upnp,
-    pub(super) pods: HashMap<DeimosId, Arc<Pod>>,
+    docker: Docker,
+    upnp: Upnp,
+    pods: HashMap<DeimosId, Arc<Pod>>,
 }
 
 pub type PodStateStreamMapper = dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync;

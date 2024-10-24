@@ -4,11 +4,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use igd_next::PortMappingProtocol;
-use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Identity;
-use tonic::transport::{Certificate, Server, ServerTlsConfig};
-use zeroize::Zeroize;
+use tonic::transport::Server;
 
 use crate::pod::docker::logs::PodLogStream;
 use crate::pod::id::DeimosId;
@@ -45,26 +42,24 @@ impl ApiState {
     /// to manage containers
     pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
         let lease = match config.upnp {
-            true => match upnp
-                .request(vec![UpnpLeaseData {
-                    port: config.bind.port(),
-                    protocol: PortMappingProtocol::TCP,
-                    name: "Deimos gRPC server".to_owned(),
-                }])
-                .await
-            {
-                Ok(lease) => Some(lease),
-                Err(e) => {
-                    tracing::error!("Failed to get UPnP lease for gRPC server: {e}");
-                    None
-                }
-            },
+            true => Some(
+                upnp
+                    .request(vec![
+                        UpnpLeaseData {
+                            port: config.bind.port(),
+                            protocol: PortMappingProtocol::TCP,
+                            name: "Deimos gRPC server".to_owned(),
+                        }
+                    ])
+                    .await?
+            ),
             false => None,
         };
 
         Ok(Self { config, lease })
     }
-
+    
+    /// Apply settings given in the API configuration to create a new gRPC server
     async fn init_server(config: &ApiConfig) -> Result<Server, ApiInitError> {
         let server = Server::builder().timeout(config.timeout);
         Ok(server)
@@ -244,6 +239,8 @@ type PodLogApiMapper = dyn FnMut(Bytes) -> Result<proto::PodLogChunk, tonic::Sta
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiInitError {
+    #[error("Failed to get UPnP lease for gRPC server: {0}")]
+    UpnpLease(#[from] crate::server::upnp::UpnpError),
     #[error("Failed to load sensitive file {}: {}", .0.display(), .1)]
     LoadSensitiveFile(PathBuf, std::io::Error),
     #[error("Failed to set server TLS configuration: {}", .0)]

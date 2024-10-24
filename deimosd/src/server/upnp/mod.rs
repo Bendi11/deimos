@@ -13,22 +13,27 @@ use tokio_util::sync::CancellationToken;
 
 use super::Deimos;
 
-/// State required to request ports with UPnP
+/// State required to request port forwarding when the server is behind a NAT
 #[derive(Clone)]
 pub struct Upnp {
-    tx: tokio::sync::mpsc::Sender<UpnpLeaseData>,
+    /// Transmitter sending new UPnP leases to the maintainer thread
+    /// when they are accquired
+    tx: tokio::sync::mpsc::Sender<u16>,
+    /// Local IP address, accquired from the local network interface
     local_ip: IpAddr,
+    /// Map of all active UPnP leases
     leases: UpnpLeases,
 }
 
-pub type UpnpReceiver = tokio::sync::mpsc::Receiver<UpnpLeaseData>;
+pub type UpnpReceiver = tokio::sync::mpsc::Receiver<u16>;
 
+/// A reference to a mapping of active UPnP leases
 #[derive(Clone, Default)]
 struct UpnpLeases {
     map: Arc<DashMap<u16, UpnpLeaseData>>,
 }
 
-/// Data required for UPNP lease
+/// Data required to create a UPnP lease
 #[derive(Debug, Clone)]
 pub struct UpnpLeaseData {
     pub name: String,
@@ -102,7 +107,12 @@ impl Upnp {
                     }
                 },
                 Some(new) = rx.recv() => {
-                    self.accquire(&gateway, &new).await;
+                    match self.leases.map.get(&new) {
+                        Some(ref lease) => self.accquire(&gateway, lease).await,
+                        None => {
+                            tracing::warn!("Notified of new UPnP lease that does not yet have a mapping");
+                        }
+                    }
                 }
             };
         }
@@ -145,13 +155,14 @@ impl Upnp {
         &self,
         leases: Vec<UpnpLeaseData>,
     ) -> Result<UpnpLease, UpnpError> {
-        for data in leases.iter() {
-            if let Err(e) = self.tx.send(data.clone()).await {
-                tracing::error!("Failed to send UPnP lease data to thread: {e}");
+        let lease = self.leases.add(leases).await?;
+        for port in lease.ports.iter() {
+            if let Err(e) = self.tx.send(*port).await {
+                tracing::error!("Failed to send UPnP port update notification to UPnP maintainer: {}", e);
             }
         }
 
-        self.leases.add(leases).await
+        Ok(lease)
     }
 }
 
