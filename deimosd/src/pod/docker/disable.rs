@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use futures::{stream::FuturesUnordered, StreamExt};
 
-use crate::pod::{id::DockerId, manager::PodManager, Pod, PodStateKnown};
+use crate::pod::{id::DockerId, Pod, PodManager, PodStateKnown};
+
 
 impl PodManager {
     /// Fully disable all pods

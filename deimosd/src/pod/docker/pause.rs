@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::pod::{manager::PodManager, Pod, PodPaused, PodStateKnown};
+use crate::pod::{state::PodPaused, Pod, PodManager, PodStateKnown};
 
 impl PodManager {
     /// Pause the given container if it is enabled and running, or no-op

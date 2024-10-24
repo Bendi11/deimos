@@ -1,159 +1,179 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    collections::HashMap,
+    future::Future,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
-use config::PodConfig;
-use id::{DeimosId, DockerId};
-use tokio::sync::Mutex;
-use tokio_util::sync::CancellationToken;
+use bollard::Docker;
+use futures::{
+    future::BoxFuture,
+    stream::{FuturesUnordered, SelectAll},
+    Stream, StreamExt,
+};
+use id::DeimosId;
 
-use crate::server::{upnp::UpnpLease, Deimos};
+use crate::server::upnp::Upnp;
 
-pub mod config;
 pub mod docker;
 pub mod id;
-pub mod manager;
+pub mod config;
+pub mod state;
 
-/// Represents a single pod with associated config and running Docker container if any exists
-pub struct Pod {
-    config: PodConfig,
-    state: PodStateHandle,
+pub use state::{Pod,  PodState, PodStateKnown};
+pub use config::{DockerConnectionConfig, DockerConnectionType, PodManagerConfig, PodConfig};
+
+/// Manager responsible for orchestrating Docker containers and watching for external events and
+/// failures
+pub struct PodManager {
+    config: PodManagerConfig,
+    pub(super) docker: Docker,
+    pub(super) upnp: Upnp,
+    pub(super) pods: HashMap<DeimosId, Arc<Pod>>,
 }
 
-pub struct PodStateHandle {
-    lock: Mutex<PodStateKnown>,
-    tx: tokio::sync::watch::Sender<PodState>,
-}
+pub type PodStateStreamMapper = dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync;
+pub type PodStateStream = SelectAll<
+    futures::stream::Map<
+        tokio_stream::wrappers::WatchStream<PodState>,
+        Box<PodStateStreamMapper>,
+    >,
+>;
 
-/// A handle allowing mutations to the state of a [Pod]
-pub struct PodStateWriteHandle<'a> {
-    lock: tokio::sync::MutexGuard<'a, PodStateKnown>,
-    tx: tokio::sync::watch::Sender<PodState>,
-}
+impl PodManager {
+    /// Load a config TOML file from the given path, and use the options specified inside to
+    /// create a connection to the local Docker server, then load all pods from the directory
+    /// given.
+    pub async fn new(config: PodManagerConfig, upnp: Upnp) -> Result<Self, PodManagerInitError> {
+        let docker = match config.docker {
+            None => Docker::connect_with_local_defaults().map(|docker| {
+                docker.with_timeout(Duration::from_secs(
+                    DockerConnectionConfig::default_timeout(),
+                ))
+            }),
+            Some(ref conn) => match conn.kind {
+                DockerConnectionType::Http => Docker::connect_with_http(
+                    &conn.addr,
+                    conn.timeout,
+                    bollard::API_DEFAULT_VERSION,
+                ),
+                DockerConnectionType::Local => Docker::connect_with_local(
+                    &conn.addr,
+                    conn.timeout,
+                    bollard::API_DEFAULT_VERSION,
+                ),
+            },
+        }?;
 
-/// Current state of a pod - including if the state is currently unknown and being modified
-#[derive(Debug, Clone, Copy)]
-pub enum PodState {
-    Disabled,
-    Transit,
-    Paused,
-    Enabled,
-}
-
-/// State of a pod with the guarantee that the state is always known
-pub enum PodStateKnown {
-    Disabled,
-    Paused(PodPaused),
-    Enabled(PodEnable),
-}
-
-/// State maintained for a pod that is running
-pub struct PodEnable {
-    pub docker_id: DockerId,
-    pub upnp_lease: UpnpLease,
-}
-
-/// State maintained for a pod that has been paused and can be quickly restarted
-pub struct PodPaused {
-    pub docker_id: DockerId,
-}
-
-impl Deimos {
-    pub async fn pod_task(self: Arc<Self>, cancel: CancellationToken) {
-        cancel.cancelled().await;
-        self.pods.disable_all().await;
-    }
-}
-
-impl Pod {
-    /// Get the user-visible title for this container
-    pub fn title(&self) -> &str {
-        &self.config.name
-    }
-
-    /// Get the ID used to refer to the container in API requests
-    pub fn id(&self) -> DeimosId {
-        self.config.id.clone()
-    }
-
-    /// Get an immutable reference to the current state
-    pub fn state(&self) -> PodState {
-        self.state.current()
-    }
-
-    /// Wait until other mutable accesses to the current state have finished, then acquire a lock
-    /// and return
-    pub async fn state_lock(&self) -> PodStateWriteHandle {
-        self.state.lock().await
-    }
-
-    /// Load the pod from config files located in the given directory
-    async fn load(dir: &Path) -> Result<Self, PodLoadError> {
-        const CONFIG_FILENAME: &str = "pod.toml";
-
-        let path = dir.join(CONFIG_FILENAME);
-        let config_str = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|err| PodLoadError::ConfigRead { path, err })?;
-
-        let config = toml::from_str(&config_str)?;
-        let state = PodStateHandle::new(PodStateKnown::Disabled);
-
-        Ok(Self { config, state })
-    }
-}
-
-impl PodStateHandle {
-    fn new(state: PodStateKnown) -> Self {
-        let (tx, _) = tokio::sync::watch::channel(PodState::from(&state));
-        let lock = Mutex::new(state);
-
-        Self { lock, tx }
-    }
-
-    /// Lock the handle to allow mutations to the current state
-    pub async fn lock(&self) -> PodStateWriteHandle {
-        PodStateWriteHandle {
-            lock: self.lock.lock().await,
-            tx: self.tx.clone(),
+        let pods = Self::load_containers(&config.containerdir).await?;
+        if pods.is_empty() {
+            tracing::warn!("Starting pod manager with no pods configured");
         }
+
+        Ok(Self {
+            config,
+            docker,
+            upnp,
+            pods,
+        })
     }
 
-    /// Get the current state
-    pub fn current(&self) -> PodState {
-        self.lock
-            .try_lock()
-            .as_deref()
-            .map(Into::into)
-            .unwrap_or(PodState::Transit)
-    }
-}
+    /// Get a stream of state changes made to containers, with their associated ID
+    pub fn stream(&self) -> PodStateStream {
+        let iter = self.pods.values().cloned().map(|pod| {
+            let id = pod.id();
+            tokio_stream::wrappers::WatchStream::new(pod.state.tx.subscribe()).map(Box::<PodStateStreamMapper>::from(
+                Box::new(move |state| (id.clone(), state)),
+            ))
+        });
 
-impl From<&PodStateKnown> for PodState {
-    fn from(value: &PodStateKnown) -> Self {
-        match value {
-            PodStateKnown::Disabled => PodState::Disabled,
-            PodStateKnown::Paused(..) => PodState::Paused,
-            PodStateKnown::Enabled(..) => PodState::Enabled,
+        futures::stream::select_all(iter)
+    }
+
+    /// Get a reference to the pod with the given ID
+    pub fn get(&self, id: &str) -> Option<Arc<Pod>> {
+        self.pods.get(id).cloned()
+    }
+
+    /// Load all containers from directory entries in the given containers directory,
+    /// logging errors and ignoring on failure
+    async fn load_containers(
+        dir: &Path,
+    ) -> Result<HashMap<DeimosId, Arc<Pod>>, PodManagerInitError> {
+        let mut pods = HashMap::new();
+
+        let mut iter =
+            tokio::fs::read_dir(dir)
+                .await
+                .map_err(|err| PodManagerInitError::PodRead {
+                    path: dir.to_owned(),
+                    err,
+                })?;
+
+        loop {
+            let entry = match iter.next_entry().await {
+                Ok(Some(entry)) => entry,
+                Ok(None) => break,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to read directory entry from pod directory {}: {}",
+                        dir.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            let path = entry.path();
+
+            match entry.file_type().await {
+                Ok(ft) if ft.is_dir() => match Pod::load(&entry.path()).await {
+                    Ok(pod) => {
+                        pods.insert(pod.id(), Arc::new(pod));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to load container from {}: {}", path.display(), e);
+                    }
+                },
+                Ok(..) => {
+                    tracing::warn!(
+                        "Ignoring non-directory entry {} in pod directory",
+                        path.display()
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to get file type of entry {} in pod directory: {}",
+                        path.display(),
+                        e
+                    );
+                }
+            }
         }
+
+        Ok(pods)
+    }
+
+    /// Get an immutable iterator over references to the managed pods
+    pub fn iter(&self) -> impl Iterator<Item = (&DeimosId, &Arc<Pod>)> {
+        self.pods.iter()
     }
 }
 
-impl<'a> PodStateWriteHandle<'a> {
-    /// Get an immutable reference to the current state
-    pub fn state(&self) -> &PodStateKnown {
-        &self.lock
-    }
+impl<'a> IntoIterator for &'a PodManager {
+    type Item = (&'a DeimosId, &'a Arc<Pod>);
+    type IntoIter = std::collections::hash_map::Iter<'a, DeimosId, Arc<Pod>>;
 
-    /// Set the current state to the given value
-    pub fn set(&mut self, state: PodStateKnown) {
-        self.tx.send_replace((&state).into());
-        *self.lock = state;
+    fn into_iter(self) -> Self::IntoIter {
+        self.pods.iter()
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum PodLoadError {
-    #[error("Failed to read config file {}: {}", path.display(), err)]
-    ConfigRead { path: PathBuf, err: std::io::Error },
-    #[error("Failed to parse config file: {0}")]
-    ConfigParse(#[from] toml::de::Error),
+pub enum PodManagerInitError {
+    #[error("Failed to create Docker client: {0}")]
+    Docker(#[from] bollard::errors::Error),
+    #[error("Failed to read entries from pod directory {}: {}", path.display(), err)]
+    PodRead { path: PathBuf, err: std::io::Error },
 }

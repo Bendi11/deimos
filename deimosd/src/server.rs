@@ -5,7 +5,8 @@ use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
 use upnp::{Upnp, UpnpReceiver};
 
-use crate::pod::manager::{PodManager, PodManagerConfig, PodManagerInitError};
+use crate::pod::{PodManager, PodManagerConfig, PodManagerInitError};
+
 
 mod api;
 pub mod upnp;

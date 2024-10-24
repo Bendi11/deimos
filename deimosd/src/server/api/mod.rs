@@ -12,8 +12,7 @@ use zeroize::Zeroize;
 
 use crate::pod::docker::logs::PodLogStream;
 use crate::pod::id::DeimosId;
-use crate::pod::manager::PodStateStream;
-use crate::pod::{Pod, PodState};
+use crate::pod::{Pod, PodState, PodStateStream};
 
 use super::upnp::{Upnp, UpnpLease, UpnpLeaseData};
 use super::Deimos;

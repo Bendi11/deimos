@@ -77,7 +77,7 @@ impl Upnp {
     }
 
     /// Task run to repeatedly renew all UPnP leases
-    pub async fn task(&self, mut rx: tokio::sync::mpsc::Receiver<UpnpLeaseData>) {
+    pub async fn task(&self, mut rx: UpnpReceiver) {
         let gateway = match igd_next::aio::tokio::search_gateway(Default::default()).await {
             Ok(gateway) => gateway,
             Err(igd_next::SearchError::NoResponseWithinTimeout) => {

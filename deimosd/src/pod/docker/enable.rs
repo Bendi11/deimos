@@ -1,8 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{pod::{
-    config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodEnable, PodStateKnown,
-}, server::upnp::UpnpLeaseData};
+use crate::{pod::{config::PodDockerConfig, id::DockerId, state::PodEnable, Pod, PodManager, PodStateKnown}, server::upnp::UpnpLeaseData};
 
 impl PodManager {
     /// Top-level operation to enable the given pod.

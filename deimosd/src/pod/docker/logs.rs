@@ -4,7 +4,8 @@ use bollard::container::LogsOptions;
 use bytes::Bytes;
 use futures::{stream::BoxStream, Stream, StreamExt};
 
-use crate::pod::{manager::PodManager, Pod, PodStateKnown};
+use crate::pod::{Pod, PodManager, PodStateKnown};
+
 
 /// A streamer forwarding a Docker container's logs
 #[pin_project::pin_project]
