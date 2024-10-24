@@ -1,8 +1,31 @@
 use std::sync::Arc;
 
+use futures::{stream::FuturesUnordered, StreamExt};
+
 use crate::pod::{id::DockerId, manager::PodManager, Pod, PodStateKnown};
 
 impl PodManager {
+    /// Fully disable all pods
+    pub async fn disable_all(&self) -> Vec<PodDisableError> {
+        tracing::trace!("Disabling all enabled pods");
+
+        let mut tasks = self
+            .pods
+            .values()
+            .cloned()
+            .map(|pod| self.disable(pod))
+            .collect::<FuturesUnordered<_>>();
+
+        let mut errors = Vec::new();
+        while let Some(result) = tasks.next().await {
+            if let Err(e) = result {
+                errors.push(e);
+            }
+        }
+
+        errors
+    }
+
     /// Top-level operation to disable the given pod.
     /// Gracefully, then forcefully stops and removes the Docker container as required.
     pub async fn disable(&self, pod: Arc<Pod>) -> Result<(), PodDisableError> {
@@ -11,20 +34,20 @@ impl PodManager {
             PodStateKnown::Disabled => return Ok(()),
             PodStateKnown::Paused(ref paused) => paused.docker_id.clone(),
             PodStateKnown::Enabled(ref running) => {
-                self.stop_container(&running.docker_id, pod.config.docker.stop_timeout)
+                self.stop_container(&pod, &running.docker_id, pod.config.docker.stop_timeout)
                     .await?;
                 running.docker_id.clone()
             }
         };
 
-        if let Err(e) = self.destroy_container(&docker_id, false).await {
+        if let Err(e) = self.destroy_container(&pod, &docker_id, false).await {
             tracing::error!(
                 "Failed to destroy container {} for {}, attempting forcefully: {}",
                 docker_id,
                 pod.id(),
                 e
             );
-            if let Err(e) = self.destroy_container(&docker_id, true).await {
+            if let Err(e) = self.destroy_container(&pod, &docker_id, true).await {
                 tracing::error!(
                     "Failed to destroy container for {} forcefully: {}",
                     pod.id(),
@@ -37,7 +60,8 @@ impl PodManager {
         Ok(())
     }
 
-    async fn stop_container(&self, container: &DockerId, t: u32) -> Result<(), PodDisableError> {
+    async fn stop_container(&self, pod: &Pod, container: &DockerId, t: u32) -> Result<(), PodDisableError> {
+        tracing::trace!("Beginning graceful shutdown of container {} for {}", container, pod.id());
         self.docker
             .stop_container(
                 container,
@@ -49,9 +73,12 @@ impl PodManager {
 
     pub(super) async fn destroy_container(
         &self,
+        pod: &Pod,
         container: &DockerId,
         force: bool,
     ) -> Result<(), PodDisableError> {
+        tracing::trace!("Destroying container {} for {}", container, pod.id());
+
         self.docker
             .remove_container(
                 container,

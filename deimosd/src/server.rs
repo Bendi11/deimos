@@ -3,18 +3,18 @@ use std::{process::ExitCode, sync::Arc};
 use api::{ApiConfig, ApiInitError, ApiState};
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
-use upnp::Upnp;
+use upnp::{Upnp, UpnpReceiver};
 
 use crate::pod::manager::{PodManager, PodManagerConfig, PodManagerInitError};
 
 mod api;
-mod upnp;
+pub mod upnp;
 
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
 pub struct Deimos {
-    pods: PodManager,
-    api: ApiState,
     upnp: Upnp,
+    pub pods: PodManager,
+    api: ApiState,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -27,41 +27,42 @@ pub struct DeimosConfig {
 impl Deimos {
     /// Create a new server instance, loading all required files from the configuration specified
     /// and creating a TCP listener for the control interface.
-    pub async fn new(config: DeimosConfig) -> Result<Arc<Self>, ServerInitError> {
-        let upnp = Upnp::new().await?;
-        let pods = PodManager::init(config.pod).await?;
+    /// Then run the server until an interrupt signal is received or a fatal error occurs
+    pub async fn run(config: DeimosConfig) -> Result<(), DeimosRunError> {
+        let (upnp, upnp_rx) = Upnp::new().await?;
         let api = ApiState::new(&upnp, config.api).await?;
+        let pods = PodManager::new(config.pod, upnp.clone()).await?;
+        let this = Arc::new(
+            Self {
+                pods,
+                api,
+                upnp,
+            }
+        );
 
-        Ok(Arc::new(Self { pods, api, upnp }))
-    }
-
-    /// Run the server until an interrupt signal is received or a fatal error occurs
-    pub async fn run(self: Arc<Self>) -> ExitCode {
         let cancel = CancellationToken::new();
-
-        let api_server = tokio::task::spawn(self.clone().api_task(cancel.clone()));
-        let upnp = tokio::task::spawn(self.clone().upnp_task(cancel.clone()));
+        let upnp = tokio::task::spawn(this.clone().upnp_task(upnp_rx, cancel.clone()));
+        let api_server = tokio::task::spawn(this.clone().api_task(cancel.clone()));
+        let pods = tokio::task::spawn(this.clone().pod_task(cancel.clone()));
 
         #[cfg(unix)]
         {
-            let mut close = match tokio::signal::unix::signal(SignalKind::interrupt()) {
-                Ok(sig) => sig,
-                Err(e) => {
-                    tracing::error!("Failed to create SIGINT handler: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
+            let (mut int, mut term) = match (
+                tokio::signal::unix::signal(SignalKind::interrupt()),
+                tokio::signal::unix::signal(SignalKind::terminate()),
+            ) {
+                (Ok(int), Ok(term)) => (int, term),
+                (Err(e), _) | (_, Err(e)) => {
+                    cancel.cancel();
 
-            let mut term = match tokio::signal::unix::signal(SignalKind::terminate()) {
-                Ok(sig) => sig,
-                Err(e) => {
-                    tracing::error!("Failed to create SIGTERM handler: {e}");
-                    return ExitCode::FAILURE;
+                    return Err(
+                        DeimosRunError::Signal(e)
+                    )
                 }
             };
 
             tokio::select! {
-                _ = close.recv() => {
+                _ = int.recv() => {
                     tracing::info!("Got SIGINT");
                 },
                 _ = term.recv() => {
@@ -75,18 +76,21 @@ impl Deimos {
         let _ = tokio::join! {
             api_server,
             upnp,
+            pods,
         };
-
-        ExitCode::SUCCESS
+        
+        Ok(())
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ServerInitError {
+pub enum DeimosRunError {
     #[error("Failed to initialize API server: {0}")]
     Api(#[from] ApiInitError),
     #[error("Failed to initialize Docker service: {0}")]
     Pod(#[from] PodManagerInitError),
     #[error("Failed to initialize UPNP state: {0}")]
     Upnp(#[from] upnp::UpnpInitError),
+    #[error("Failed to subscribe to signals: {0}")]
+    Signal(#[source] std::io::Error),
 }

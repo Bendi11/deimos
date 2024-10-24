@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use cview::{PodView, PodViewMessage};
+use pview::{PodView, PodViewMessage};
 use iced::{
     widget::{svg, Svg},
     Length, Task,
@@ -11,7 +11,7 @@ use style::{orbit, Button, Column, Container, Element, Row, Theme};
 
 use crate::context::{Context, ContextMessage};
 
-mod cview;
+mod pview;
 mod settings;
 mod sidebar;
 mod style;
@@ -116,7 +116,7 @@ impl DeimosApplication {
                 SidebarMessage::SelectContainer(container) => {
                     let task = self
                         .pod_view
-                        .update(&mut self.ctx, PodViewMessage::ChangeView(container))
+                        .update(&mut self.ctx, PodViewMessage::ViewPod(container))
                         .map(DeimosMessage::PodView);
                     task.chain(iced::Task::done(DeimosMessage::Navigate(
                         DeimosView::ContainerView,

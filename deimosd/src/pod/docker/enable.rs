@@ -1,37 +1,56 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::pod::{
+use crate::{pod::{
     config::PodDockerConfig, id::DockerId, manager::PodManager, Pod, PodEnable, PodStateKnown,
-};
+}, server::upnp::UpnpLeaseData};
 
 impl PodManager {
     /// Top-level operation to enable the given pod.
     /// Creates and starts Docker container as required based on the current state of the pod.
     /// If the pod is already enabled, this is a no-op.
     pub async fn enable(&self, pod: Arc<Pod>) -> Result<(), PodEnableError> {
+        let leases = pod
+            .config
+            .docker
+            .port
+            .iter()
+            .map(|port|
+                UpnpLeaseData {
+                    name: format!("deimos.{}", pod.id()),
+                    port: port.expose,
+                    protocol: port.protocol.into()
+                }
+            )
+            .collect::<Vec<_>>();
+
         let mut lock = pod.state_lock().await;
-        let docker_id = match lock.state() {
+        let (upnp_lease, docker_id) = match lock.state() {
             PodStateKnown::Enabled(..) => return Ok(()),
-            PodStateKnown::Paused(ref paused) => paused.docker_id.clone(),
+            PodStateKnown::Paused(ref paused) => {
+                let leases = self.upnp.request(leases).await?;
+                self.start_container(&pod, &paused.docker_id).await?;
+                (leases, paused.docker_id.clone())
+            },
             PodStateKnown::Disabled => {
+                let leases = self.upnp.request(leases).await?;
                 let container = self.create_container(&pod).await?;
-                if let Err(e) = self.start_container(&container).await {
+                if let Err(e) = self.start_container(&pod, &container).await {
                     tracing::warn!(
                         "Container for pod {} failed to start, destroying it",
                         pod.id()
                     );
-                    if let Err(e) = self.destroy_container(&container, true).await {
+                    if let Err(e) = self.destroy_container(&pod, &container, true).await {
                         tracing::error!("Failsafe destroy failed for pod {}: {}", pod.id(), e);
                     }
 
                     return Err(e);
                 }
 
-                container
+                (leases, container)
             }
         };
 
-        lock.set(PodStateKnown::Enabled(PodEnable { docker_id }));
+        lock.set(PodStateKnown::Enabled(PodEnable { docker_id, upnp_lease }));
 
         Ok(())
     }
@@ -60,7 +79,9 @@ impl PodManager {
         Ok(docker_id)
     }
 
-    async fn start_container(&self, container: &DockerId) -> Result<(), PodEnableError> {
+    async fn start_container(&self, pod: &Pod, container: &DockerId) -> Result<(), PodEnableError> {
+        tracing::trace!("Starting container {} for {}", container, pod.id());
+
         self.docker
             .start_container(
                 container,
@@ -125,4 +146,6 @@ pub enum PodEnableError {
     CreateContainer(#[source] bollard::errors::Error),
     #[error("Failed to start Docker container: {0}")]
     StartContainer(#[source] bollard::errors::Error),
+    #[error("Failed to acquire UPnP lease: {0}")]
+    Upnp(#[from] crate::server::upnp::UpnpError),
 }

@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use std::{sync::Arc, task::Poll};
 
+use bollard::container::LogsOptions;
 use bytes::Bytes;
 use futures::{stream::BoxStream, Stream, StreamExt};
 
@@ -18,10 +19,20 @@ impl PodManager {
         match *lock.state() {
             PodStateKnown::Enabled(ref run) => Ok(
                 PodLogStream::new(
-                        self
-                            .docker
-                            .logs(&run.docker_id, Option::<bollard::container::LogsOptions<&'static str>>::None)
-                            .boxed()
+                    self
+                        .docker
+                        .logs(
+                            &run.docker_id, 
+                            Some(
+                                LogsOptions::<&'static str> {
+                                    stdout: true,
+                                    stderr: true,
+                                    follow: true,
+                                    ..Default::default()
+                                }
+                            )
+                        )
+                        .boxed()
                 )
             ),
             _ => Err(PodSubscribeLogsError::NotEnabled),
@@ -43,20 +54,28 @@ impl Stream for PodLogStream {
 
     fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
         let stream = self.project();
-        stream
+        let poll = stream
             .stream
-            .poll_next(cx)
-            .map(
-                |o| o.and_then(
-                    |result| match result {
+            .poll_next(cx);
+
+        match poll {
+            Poll::Ready(value) => Poll::Ready(
+                match value {
+                    Some(buf) => match buf {
                         Ok(buf) => Some(buf.into_bytes()),
                         Err(e) => {
-                            tracing::warn!("Log stream failed: {e}");
+                            tracing::warn!("Log stream closing due to failure: {e}");
                             None
                         }
+                    },
+                    None => {
+                        tracing::trace!("Stream for container stopped");
+                        None
                     }
-                )
-            )
+                }
+            ),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 

@@ -1,8 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, sync::Arc};
 
 use config::PodConfig;
 use id::{DeimosId, DockerId};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
+
+use crate::server::{upnp::UpnpLease, Deimos};
 
 pub mod config;
 pub mod docker;
@@ -42,12 +45,22 @@ pub enum PodStateKnown {
     Enabled(PodEnable),
 }
 
+/// State maintained for a pod that is running
 pub struct PodEnable {
+    pub docker_id: DockerId,
+    pub upnp_lease: UpnpLease,
+}
+
+/// State maintained for a pod that has been paused and can be quickly restarted
+pub struct PodPaused {
     pub docker_id: DockerId,
 }
 
-pub struct PodPaused {
-    pub docker_id: DockerId,
+impl Deimos {
+    pub async fn pod_task(self: Arc<Self>, cancel: CancellationToken) {
+        cancel.cancelled().await;
+        self.pods.disable_all().await;
+    }
 }
 
 impl Pod {

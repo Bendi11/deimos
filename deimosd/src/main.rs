@@ -50,8 +50,8 @@ async fn main() -> ExitCode {
         }
     };
 
-    match Deimos::new(conf).await {
-        Ok(server) => server.run().await,
+    match Deimos::run(conf).await {
+        Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!("{e}");
             ExitCode::FAILURE

@@ -14,11 +14,14 @@ use tokio_util::sync::CancellationToken;
 use super::Deimos;
 
 /// State required to request ports with UPnP
+#[derive(Clone)]
 pub struct Upnp {
-    refresh: Notify,
+    tx: tokio::sync::mpsc::Sender<UpnpLeaseData>,
     local_ip: IpAddr,
     leases: UpnpLeases,
 }
+
+pub type UpnpReceiver = tokio::sync::mpsc::Receiver<UpnpLeaseData>;
 
 #[derive(Clone, Default)]
 struct UpnpLeases {
@@ -43,8 +46,8 @@ pub struct UpnpLease {
 
 impl Deimos {
     /// Run a task to refresh all UPnP leases periodically
-    pub async fn upnp_task(self: Arc<Self>, cancel: CancellationToken) {
-        let task = self.upnp.task();
+    pub async fn upnp_task(self: Arc<Self>, rx: UpnpReceiver, cancel: CancellationToken) {
+        let task = self.upnp.task(rx);
         tokio::select! {
             _ = cancel.cancelled() => {},
             _ = task => {}
@@ -58,20 +61,23 @@ impl Upnp {
 
     /// Retrieve the local IP address from the network adapter and create an empty map of forwarded
     /// ports
-    pub async fn new() -> Result<Self, UpnpInitError> {
+    pub async fn new() -> Result<(Self, UpnpReceiver), UpnpInitError> {
         let local_ip = local_ip_address::local_ip()?;
         let leases = UpnpLeases::default();
-        let refresh = Notify::new();
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
 
-        Ok(Self {
-            local_ip,
-            leases,
-            refresh,
-        })
+        Ok((
+            Self {
+                local_ip,
+                leases,
+                tx,
+            },
+            rx
+        ))
     }
 
     /// Task run to repeatedly renew all UPnP leases
-    pub async fn task(&self) {
+    pub async fn task(&self, mut rx: tokio::sync::mpsc::Receiver<UpnpLeaseData>) {
         let gateway = match igd_next::aio::tokio::search_gateway(Default::default()).await {
             Ok(gateway) => gateway,
             Err(igd_next::SearchError::NoResponseWithinTimeout) => {
@@ -88,15 +94,15 @@ impl Upnp {
 
         loop {
             tokio::select! {
-                _ = renewal_interval.tick() => {},
-                _ = self.refresh.notified() => {
-                    tracing::trace!("Refreshing UPnP leases in response to event");
+                _ = renewal_interval.tick() => {
+                    for entry in self.leases.map.iter() {
+                        self.accquire(&gateway, entry.value()).await;
+                    }
+                },
+                Some(new) = rx.recv() => {
+                    self.accquire(&gateway, &new).await;
                 }
             };
-
-            for entry in self.leases.map.iter() {
-                self.accquire(&gateway, entry.value()).await;
-            }
         }
     }
 
@@ -137,10 +143,14 @@ impl Upnp {
         &self,
         leases: impl IntoIterator<Item = UpnpLeaseData>,
     ) -> Result<UpnpLease, UpnpError> {
-        let lease = self.leases.add(leases).await?;
-        self.refresh.notify_one();
-
-        Ok(lease)
+        self.leases.add(
+            leases
+                .into_iter()
+                .map(|data| {
+                    self.tx.send(data.clone());
+                    data
+                })
+        ).await
     }
 }
 

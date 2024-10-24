@@ -10,6 +10,7 @@ pub mod scrollable;
 pub mod svg;
 pub mod text;
 pub mod text_input;
+pub mod tabs;
 
 pub struct Theme {
     pub bg_dark: Color,
@@ -60,3 +61,4 @@ pub type Container<'a, T> = iced::widget::Container<'a, T, Theme, iced::Renderer
 pub type Scrollable<'a, T> = iced::widget::Scrollable<'a, T, Theme, iced::Renderer>;
 pub type Button<'a, T> = iced::widget::Button<'a, T, Theme, iced::Renderer>;
 pub type Svg<'a> = iced::widget::Svg<'a, Theme>;
+pub type Tabs<'a, M, T> = iced_aw::widgets::Tabs<'a, M, T, Theme, iced::Renderer>;

@@ -190,22 +190,14 @@ impl proto::DeimosService for Deimos {
 
     type SubscribePodStatusStream = futures::stream::Map<
         PodStateStream,
-        Box<
-            dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status>
-                + Send
-                + Sync,
-        >,
+        Box<PodStatusApiMapper>,
     >;
 
     async fn subscribe_pod_status(
         self: Arc<Self>,
         _: tonic::Request<proto::PodStatusStreamRequest>,
     ) -> Result<tonic::Response<Self::SubscribePodStatusStream>, tonic::Status> {
-        let stream = self.pods.stream().map(Box::<
-            dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status>
-                + Send
-                + Sync,
-        >::from(Box::new(move |(id, state)| {
+        let stream = self.pods.stream().map(Box::<PodStatusApiMapper>::from(Box::new(move |(id, state)| {
             Ok(proto::PodStatusNotification {
                 id: id.owned(),
                 state: proto::PodState::from(state) as i32,
@@ -222,6 +214,8 @@ impl proto::DeimosService for Deimos {
 
     async fn subscribe_pod_logs(self: Arc<Self>, req: tonic::Request<proto::PodLogStreamRequest>) -> Result<tonic::Response<Self::SubscribePodLogsStream>, tonic::Status> {
         let pod = self.lookup_pod(req.into_inner().id)?;
+        tracing::trace!("Client subscribed to logs for {}", pod.id());
+
         self
             .pods
             .subscribe_logs(pod)
@@ -246,6 +240,7 @@ impl proto::DeimosService for Deimos {
     }
 }
 
+type PodStatusApiMapper = dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status> + Send + Sync;
 type PodLogApiMapper = dyn FnMut(Bytes) -> Result<proto::PodLogChunk, tonic::Status> + Send + Sync;
 
 #[derive(Debug, thiserror::Error)]

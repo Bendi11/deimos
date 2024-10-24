@@ -12,7 +12,8 @@ use futures::{
     stream::{FuturesUnordered, SelectAll},
     Stream, StreamExt,
 };
-use tokio_util::sync::ReusableBoxFuture;
+
+use crate::server::upnp::Upnp;
 
 use super::{id::DeimosId, Pod, PodState};
 
@@ -25,13 +26,15 @@ pub use config::{DockerConnectionConfig, DockerConnectionType, PodManagerConfig}
 pub struct PodManager {
     config: PodManagerConfig,
     pub(super) docker: Docker,
-    pods: HashMap<DeimosId, Arc<Pod>>,
+    pub(super) upnp: Upnp,
+    pub(super) pods: HashMap<DeimosId, Arc<Pod>>,
 }
 
+pub type PodStateStreamMapper = dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync;
 pub type PodStateStream = SelectAll<
     futures::stream::Map<
         tokio_stream::wrappers::WatchStream<PodState>,
-        Box<dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync>,
+        Box<PodStateStreamMapper>,
     >,
 >;
 
@@ -39,7 +42,7 @@ impl PodManager {
     /// Load a config TOML file from the given path, and use the options specified inside to
     /// create a connection to the local Docker server, then load all pods from the directory
     /// given.
-    pub async fn init(config: PodManagerConfig) -> Result<Self, PodManagerInitError> {
+    pub async fn new(config: PodManagerConfig, upnp: Upnp) -> Result<Self, PodManagerInitError> {
         let docker = match config.docker {
             None => Docker::connect_with_local_defaults().map(|docker| {
                 docker.with_timeout(Duration::from_secs(
@@ -68,6 +71,7 @@ impl PodManager {
         Ok(Self {
             config,
             docker,
+            upnp,
             pods,
         })
     }
@@ -76,9 +80,7 @@ impl PodManager {
     pub fn stream(&self) -> PodStateStream {
         let iter = self.pods.values().cloned().map(|pod| {
             let id = pod.id();
-            tokio_stream::wrappers::WatchStream::new(pod.state.tx.subscribe()).map(Box::<
-                dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync,
-            >::from(
+            tokio_stream::wrappers::WatchStream::new(pod.state.tx.subscribe()).map(Box::<PodStateStreamMapper>::from(
                 Box::new(move |state| (id.clone(), state)),
             ))
         });
@@ -151,7 +153,7 @@ impl PodManager {
     }
 
     /// Get an immutable iterator over references to the managed pods
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = (&'a DeimosId, &'a Arc<Pod>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&DeimosId, &Arc<Pod>)> {
         self.pods.iter()
     }
 }
@@ -161,7 +163,7 @@ impl<'a> IntoIterator for &'a PodManager {
     type IntoIter = std::collections::hash_map::Iter<'a, DeimosId, Arc<Pod>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.pods).into_iter()
+        self.pods.iter()
     }
 }
 

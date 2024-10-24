@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
-use deimosproto::DeimosServiceClient;
+use deimosproto::{DeimosServiceClient, PodLogStreamRequest};
 use http::Uri;
 use iced::futures::{Stream, StreamExt};
 use pod::{CachedPod, CachedPodData, CachedPodState, CachedPodStateFull};
@@ -26,7 +26,17 @@ pub struct Context {
     pub pods: SlotMap<PodRef, CachedPod>,
     /// Directory that all container data and context state will be saved to
     cache_dir: PathBuf,
+    /// State of API connection, determined from gRPC status codes when operations fail
+    conn: ContextConnectionState,
+    /// Client for the gRPC API
     api: Option<Arc<Mutex<DeimosServiceClient<Channel>>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextConnectionState {
+    Unknown,
+    Connected,
+    Error,
 }
 
 /// Settings that may be adjusted by the user
@@ -36,6 +46,7 @@ pub struct ContextSettings {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
+
 }
 
 /// Persistent state kept for the [Context]'s connection
@@ -52,6 +63,8 @@ pub enum ContextMessage {
     Loaded(Vec<CachedPod>),
     /// gRPC client must be initialized in async context
     ClientInit(Box<DeimosServiceClient<Channel>>),
+    /// Upate from API methods informing new connection state
+    ConnectionStatus(ContextConnectionState),
     /// Received a listing of containers from the server, so update our local cache to match.
     /// Also remove any containers if their IDs are not contained in the given response
     BeginSynchronizeFromQuery(deimosproto::QueryPodsResponse),
@@ -90,13 +103,54 @@ impl Context {
         }
     }
 
+    async fn subscribe_pod_logs(
+        api: Arc<Mutex<DeimosServiceClient<Channel>>>,
+        id: String,
+    ) -> Option<impl Stream<Item = Vec<u8>>> {
+        match api.lock().await.subscribe_pod_logs(deimosproto::PodLogStreamRequest { id: id.clone() }).await {
+            Ok(stream) => Some(
+                stream.into_inner().filter_map(|chunk| async move { chunk.ok().map(|chunk| chunk.chunk) })
+            ),
+            Err(e) => {
+                tracing::error!("Failed to subscribe to pod {} logs: {}", id, e);
+                None
+            }
+        }
+    }
+
+    pub fn pod_logs(&self, pod: PodRef) -> iced::Task<Vec<u8>> {
+        let Some(api) = self.api.clone() else { return iced::Task::none() };
+        let Some(id) = self.pods.get(pod).map(|pod| pod.data.id.clone()) else { return iced::Task::none() };
+        iced::Task::future(Self::subscribe_pod_logs(api, id))
+            .and_then(iced::Task::stream)
+    }
+
     /// Subscribe to container status updates from the server
     fn subscription(
         api: Arc<Mutex<DeimosServiceClient<Channel>>>,
     ) -> impl Stream<Item = ContextMessage> {
         async_stream::stream! {
             loop {
-                let mut stream = Self::subscribe_pod_events(api.clone()).await;
+                let mut stream = {
+                    let mut api = api.lock().await;
+                    match api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {}).await {
+                        Ok(stream) => {
+                            yield ContextMessage::ConnectionStatus(ContextConnectionState::Connected);
+                            stream.into_inner()
+                        },
+                        Err(e) => match e.code() {
+                            tonic::Code::Unavailable => {
+                                yield ContextMessage::ConnectionStatus(ContextConnectionState::Error);
+                                continue
+                            },
+                            _ => {
+                                tracing::error!("Failed to subscribe to pod status stream: {e}");
+                                continue
+                            }
+                        }
+                    }
+                };
+
                 while let Some(event) = stream.next().await {
                     match event {
                         Ok(event) => {
@@ -104,7 +158,7 @@ impl Context {
                         },
                         Err(e) => {
                             tracing::error!("Failed to read pod status notification: {e}");
-                        }
+                        },
                     }
                 }
 
@@ -135,7 +189,8 @@ impl Context {
                 ContextState::default()
             }
         };
-
+        
+        let conn = ContextConnectionState::Unknown;
         let api = None;
         let state = state;
         let containers = SlotMap::<PodRef, CachedPod>::default();
@@ -143,11 +198,14 @@ impl Context {
         Self {
             state,
             api,
+            conn,
             pods: containers,
             cache_dir,
         }
     }
-
+    
+    /// Perform all initialization after loading context state from a cache directory, including
+    /// loading all cached containers and initiating a connection to the API
     pub fn post_load_init(&self) -> iced::Task<ContextMessage> {
         iced::Task::perform(
             Self::load_cached_pods(self.cache_dir.clone()),
@@ -175,6 +233,10 @@ impl Context {
 
     pub fn update(&mut self, msg: ContextMessage) -> iced::Task<ContextMessage> {
         match msg {
+            ContextMessage::ConnectionStatus(conn) => {
+                self.conn = conn;
+                iced::Task::none()
+            },
             ContextMessage::Loaded(pods) => {
                 for c in pods {
                     self.pods.insert(c);

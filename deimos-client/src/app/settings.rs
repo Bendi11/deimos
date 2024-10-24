@@ -28,7 +28,7 @@ impl Settings {
             .padding(Padding::default().top(30f32))
             .align_x(Horizontal::Center)
             .spacing(16f32)
-            .max_width(Pixels(256f32))
+            .max_width(Pixels(512f32))
             .push(
                 Column::new().push(Text::new("Server URI")).push(
                     TypedInput::new("URL", &ctx.state.settings.server_uri)

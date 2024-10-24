@@ -986,6 +986,7 @@ dependencies = [
  "chrono",
  "deimosproto",
  "dirs 5.0.1",
+ "futures",
  "http 1.1.0",
  "http-serde",
  "iced",

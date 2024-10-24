@@ -46,7 +46,7 @@ impl From<String> for DockerId {
 
 impl Display for DockerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", &self.0[0..self.len().max(8)])
+        write!(f, "{}", &self.0[..self.len().min(12)])
     }
 }
 
