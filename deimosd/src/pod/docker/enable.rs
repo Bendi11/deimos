@@ -12,7 +12,8 @@ impl PodManager {
             .docker
             .port
             .iter()
-            .map(|port|
+            .filter(|port| port.upnp)
+            .map(|port| 
                 UpnpLeaseData {
                     name: format!("deimos.{}", pod.id()),
                     port: port.expose,

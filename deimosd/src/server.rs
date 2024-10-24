@@ -1,9 +1,9 @@
-use std::{process::ExitCode, sync::Arc};
+use std::sync::Arc;
 
 use api::{ApiConfig, ApiInitError, ApiState};
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
-use upnp::{Upnp, UpnpReceiver};
+use upnp::Upnp;
 
 use crate::pod::{PodManager, PodManagerConfig, PodManagerInitError};
 
