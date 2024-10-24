@@ -47,11 +47,11 @@ impl ApiState {
     pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
         let lease = match config.upnp {
             true => match upnp
-                .request(std::iter::once(UpnpLeaseData {
+                .request(vec![UpnpLeaseData {
                     port: config.bind.port(),
                     protocol: PortMappingProtocol::TCP,
                     name: "Deimos gRPC server".to_owned(),
-                }))
+                }])
                 .await
             {
                 Ok(lease) => Some(lease),

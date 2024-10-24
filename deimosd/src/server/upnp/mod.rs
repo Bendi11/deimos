@@ -25,7 +25,7 @@ pub type UpnpReceiver = tokio::sync::mpsc::Receiver<UpnpLeaseData>;
 
 #[derive(Clone, Default)]
 struct UpnpLeases {
-    map: DashMap<u16, UpnpLeaseData>,
+    map: Arc<DashMap<u16, UpnpLeaseData>>,
 }
 
 /// Data required for UPNP lease
@@ -91,6 +91,8 @@ impl Upnp {
         };
 
         let mut renewal_interval = tokio::time::interval(Self::RENEWAL_INTERVAL);
+        renewal_interval.tick().await;
+        renewal_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
             tokio::select! {
@@ -141,16 +143,15 @@ impl Upnp {
     /// mapped until it is dropped
     pub async fn request(
         &self,
-        leases: impl IntoIterator<Item = UpnpLeaseData>,
+        leases: Vec<UpnpLeaseData>,
     ) -> Result<UpnpLease, UpnpError> {
-        self.leases.add(
-            leases
-                .into_iter()
-                .map(|data| {
-                    self.tx.send(data.clone());
-                    data
-                })
-        ).await
+        for data in leases.iter() {
+            if let Err(e) = self.tx.send(data.clone()).await {
+                tracing::error!("Failed to send UPnP lease data to thread: {e}");
+            }
+        }
+
+        self.leases.add(leases).await
     }
 }
 
