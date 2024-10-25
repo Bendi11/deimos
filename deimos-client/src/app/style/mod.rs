@@ -55,6 +55,7 @@ pub type Element<'a, T> = iced::Element<'a, T, Theme, iced::Renderer>;
 pub type Row<'a, T> = iced::widget::Row<'a, T, Theme, iced::Renderer>;
 pub type Column<'a, T> = iced::widget::Column<'a, T, Theme, iced::Renderer>;
 pub type Text<'a> = iced::widget::Text<'a, Theme, iced::Renderer>;
+pub type Rich<'a, Link> = iced::widget::text::Rich<'a, Link, Theme, iced::Renderer>;
 pub type TextInput<'a, T> = iced::widget::TextInput<'a, T, Theme, iced::Renderer>;
 pub type Rule<'a> = iced::widget::Rule<'a, Theme>;
 pub type Container<'a, T> = iced::widget::Container<'a, T, Theme, iced::Renderer>;

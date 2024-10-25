@@ -6,12 +6,14 @@ use futures::{stream::BoxStream, Stream, StreamExt};
 
 use crate::pod::{Pod, PodManager, PodStateKnown};
 
+struct NotifyPodLogDrop;
 
 /// A streamer forwarding a Docker container's logs
 #[pin_project::pin_project]
 pub struct PodLogStream {
     #[pin]
-    stream: BoxStream<'static, Result<bollard::container::LogOutput, bollard::errors::Error>>
+    stream: BoxStream<'static, Result<bollard::container::LogOutput, bollard::errors::Error>>,
+    other: NotifyPodLogDrop,
 }
 
 impl PodManager {
@@ -46,6 +48,7 @@ impl PodLogStream {
     fn new(stream: impl Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send + 'static) -> Self {
         Self {
             stream: stream.boxed(),
+            other: NotifyPodLogDrop,
         }
     }
 }
@@ -77,6 +80,12 @@ impl Stream for PodLogStream {
             ),
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+impl Drop for NotifyPodLogDrop {
+    fn drop(&mut self) {
+        tracing::trace!("Pod log stream dropped");
     }
 }
 

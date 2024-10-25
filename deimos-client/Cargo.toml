@@ -24,6 +24,7 @@ chrono = { workspace = true, features = ["serde"] }
 mime = { workspace = true }
 
 slotmap = { version = "1.0", features = ["serde"] }
+arraydeque = "0.5"
 
 iced_anim = "0.1"
 

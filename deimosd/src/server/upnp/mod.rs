@@ -80,8 +80,9 @@ impl Upnp {
             rx
         ))
     }
-
-    /// Task run to repeatedly renew all UPnP leases
+    
+    /// Background task that requests UPnP leases of all ports from the gateway.
+    /// This task must be running in order for UPnP leases to be actually accquired.
     pub async fn task(&self, mut rx: UpnpReceiver) {
         let gateway = match igd_next::aio::tokio::search_gateway(Default::default()).await {
             Ok(gateway) => gateway,
