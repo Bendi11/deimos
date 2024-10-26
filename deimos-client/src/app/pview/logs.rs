@@ -22,13 +22,15 @@ pub enum PodLogsMessage {
 impl PodLogsView {
     pub fn view(&self, _ctx: &Context) -> Element<PodLogsMessage> {
         let (log1, log2) = self.spool.as_slices();
-        let decode = |buf| {
-            let span = std::str::from_utf8(buf).map(Cow::Borrowed).unwrap_or_else(|_| Cow::Owned(String::from("Error decoding")));
-            Span::new(span)
-        };
+
+        let chunks = log1
+            .utf8_chunks()
+            .chain(log2.utf8_chunks())
+            .map(|chunk| Span::new(chunk.valid()))
+            .collect::<Vec<_>>();
 
         Scrollable::new(
-            Rich::with_spans([decode(log1), decode(log2)])
+            Rich::with_spans(chunks)
         )
         .anchor_bottom()
         .width(Length::Fill)
