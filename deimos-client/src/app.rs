@@ -26,7 +26,7 @@ pub struct DeimosApplication {
     view: DeimosView,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeimosView {
     Empty,
     Settings,
@@ -92,6 +92,10 @@ impl DeimosApplication {
                 iced::exit()
             }
             DeimosMessage::Navigate(view) => {
+                if view == self.view {
+                    return iced::Task::none()
+                }
+
                 let task = match self.view {
                     DeimosView::Settings => self.ctx.reload_settings().map(DeimosMessage::Context),
                     DeimosView::PodView => self.pod_view.update(&mut self.ctx, PodViewMessage::Closed).map(DeimosMessage::PodView),
@@ -181,7 +185,7 @@ impl DeimosApplication {
 
         Row::new()
             .push(self.sidebar.view(&self.ctx).map(DeimosMessage::Sidebar))
-            .push(pane)
+            .push(pane.width(Length::FillPortion(5)))
             .into()
     }
 

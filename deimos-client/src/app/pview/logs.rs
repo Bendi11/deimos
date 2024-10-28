@@ -1,21 +1,18 @@
-use std::borrow::Cow;
-
 use arraydeque::ArrayDeque;
 use iced::{widget::{text::Span, Scrollable}, Length};
 
-use crate::{app::style::{Element, Rich}, context::{Context, PodRef}};
+use crate::{app::style::{Button, Column, Element, Rich}, context::{Context, PodRef}};
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PodLogsView {
-    spool: ArrayDeque<u8, 0x10000, arraydeque::behavior::Wrapping>,
+    spool: Box<ArrayDeque<u8, 0x10000, arraydeque::behavior::Wrapping>>,
     stream: Option<iced::task::Handle>,
 }
 
 #[derive(Debug, Clone)]
 pub enum PodLogsMessage {
-    Open,
-    Close,
+    Subscribe,
     Chunk(Vec<u8>),
 }
 
@@ -26,22 +23,25 @@ impl PodLogsView {
         let chunks = log1
             .utf8_chunks()
             .chain(log2.utf8_chunks())
-            .map(|chunk| Span::new(chunk.valid()))
+            .map(|chunk| Span::new(chunk.valid()).font(iced::Font::MONOSPACE))
             .collect::<Vec<_>>();
-
-        Scrollable::new(
-            Rich::with_spans(chunks)
-        )
-        .anchor_bottom()
-        .width(Length::Fill)
-        .into()
-    }
-
-    pub fn new() -> Self {
-        Self {
-            spool: Default::default(),
-            stream: None,
-        }
+        
+        Column::new()
+            .push(
+                Scrollable::new(
+                    Rich::with_spans(chunks)
+                )
+                .width(Length::Fill)
+                .height(Length::FillPortion(9))
+                .anchor_bottom()
+            )
+            .push(
+                Button::new("Subscribe")
+                    .on_press(PodLogsMessage::Subscribe)
+                    .width(Length::Fill)
+                    .height(Length::FillPortion(1))
+            )
+            .into()
     }
     
     pub fn update(&mut self, ctx: &mut Context, viewed: PodRef, msg: PodLogsMessage) -> iced::Task<PodLogsMessage> {
@@ -50,11 +50,8 @@ impl PodLogsView {
                 self.spool.extend_back(bytes);
                 iced::Task::none()
             },
-            PodLogsMessage::Close => {
+            PodLogsMessage::Subscribe => {
                 self.stream = None;
-                iced::Task::none()
-            },
-            PodLogsMessage::Open => {
                 let (task, stream) = ctx.pod_logs(viewed).abortable();
                 let stream = stream.abort_on_drop();
                 self.stream = Some(stream);

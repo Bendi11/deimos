@@ -42,31 +42,33 @@ impl Sidebar {
             .push(
                 Svg::new(self.icon.clone())
                     .class(orbit::MARS[1])
-                    .width(Length::FillPortion(1)),
+                    .width(Length::FillPortion(5)),
             )
             .push(
                 Column::new()
                     .spacing(8)
                     .align_x(Horizontal::Center)
-                    .width(Length::FillPortion(1))
+                    .width(Length::FillPortion(6))
                     .push(
-                        Text::new("Deimos")
-                            .size(30f32)
-                            .wrapping(iced::widget::text::Wrapping::None)
-                            .center(),
+                        Container::new(
+                            Text::new("Deimos")
+                                .size(24f32)
+                                .wrapping(iced::widget::text::Wrapping::None)
+                                .center()
+                        )
+                        .height(Length::FillPortion(4)),
                     )
                     .push(
                         Container::new(
                             Button::new(
                                 Svg::new(self.reload.clone())
                                     .class((orbit::MERCURY[3], orbit::SOL[0]))
-                                    .height(32f32)
-                                    .width(32f32),
+                                    .height(Length::Fill)
                             )
                             .on_press(SidebarMessage::Refresh),
                         )
                         .width(Length::Fill)
-                        .height(Length::Fill)
+                        .height(Length::FillPortion(3))
                         .align_x(Horizontal::Right)
                         .align_y(Vertical::Bottom),
                     ),
@@ -100,7 +102,8 @@ impl Sidebar {
                     blur_radius: 16f32,
                 }),
             })
-            .width(Length::Fixed(256f32))
+            .width(Length::FillPortion(1))
+            .max_width(256)
             .height(Length::Fill)
             .into()
     }
