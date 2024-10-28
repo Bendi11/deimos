@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use deimosproto::{DeimosServiceClient, PodLogStreamRequest};
 use http::Uri;
 use iced::futures::{Stream, StreamExt};
-use pod::{CachedPod, CachedPodData, CachedPodState, CachedPodStateFull};
+use pod::{CachedPod, CachedPodData, CachedPodState};
 use slotmap::SlotMap;
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
@@ -312,17 +312,7 @@ impl Context {
     /// Change the given container's status on the server
     pub fn update_pod(&mut self, pod: PodRef, run: CachedPodState) -> iced::Task<ContextMessage> {
         let id = match self.pods.get_mut(pod) {
-            Some(pod) => {
-                pod.data.up = CachedPodStateFull::UpdateRequested {
-                    old: match pod.data.up {
-                        CachedPodStateFull::Known(s) => s,
-                        _ => CachedPodState::Disabled,
-                    },
-                    req: run,
-                };
-
-                pod.data.id.clone()
-            }
+            Some(pod) => pod.data.id.clone(),
             None => {
                 tracing::warn!(
                     "Got update container message for unknown container '{:?}'",

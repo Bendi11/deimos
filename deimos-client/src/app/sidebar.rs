@@ -6,7 +6,7 @@ use iced::{
 };
 
 use crate::context::{
-    pod::{CachedPod, CachedPodState, CachedPodStateFull},
+    pod::{CachedPod, CachedPodState},
     Context, PodRef,
 };
 
@@ -120,20 +120,19 @@ impl Sidebar {
         container: &'a CachedPod,
     ) -> Element<'a, SidebarMessage> {
         let (msg, svg) = match container.data.up {
-            CachedPodStateFull::Known(CachedPodState::Disabled) => (
+            CachedPodState::Disabled => (
                 Some(SidebarMessage::UpdateContainer(r, CachedPodState::Enabled)),
                 Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
             ),
-            CachedPodStateFull::Known(CachedPodState::Paused) => (
+            CachedPodState::Paused => (
                 Some(SidebarMessage::UpdateContainer(r, CachedPodState::Enabled)),
                 Svg::new(self.start.clone()).class(orbit::MERCURY[2]),
             ),
-            CachedPodStateFull::Known(CachedPodState::Enabled) => (
+            CachedPodState::Enabled => (
                 Some(SidebarMessage::UpdateContainer(r, CachedPodState::Disabled)),
                 Svg::new(self.stop.clone()).class(orbit::MARS[1]),
             ),
-            CachedPodStateFull::Known(CachedPodState::Transit)
-            | CachedPodStateFull::UpdateRequested { .. } => {
+            CachedPodState::Transit => {
                 (None, Svg::new(self.reload.clone()).class(orbit::EARTH[2]))
             }
         };

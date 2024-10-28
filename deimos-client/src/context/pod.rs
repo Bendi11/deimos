@@ -17,7 +17,7 @@ pub struct CachedPod {
 pub struct CachedPodData {
     pub id: String,
     pub name: String,
-    pub up: CachedPodStateFull,
+    pub up: CachedPodState,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -26,15 +26,6 @@ pub enum CachedPodState {
     Transit,
     Paused,
     Enabled,
-}
-
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub enum CachedPodStateFull {
-    Known(CachedPodState),
-    UpdateRequested {
-        old: CachedPodState,
-        req: CachedPodState,
-    },
 }
 
 impl Context {
@@ -213,11 +204,6 @@ impl From<CachedPodState> for deimosproto::PodState {
     }
 }
 
-impl From<CachedPodState> for CachedPodStateFull {
-    fn from(value: CachedPodState) -> Self {
-        Self::Known(value)
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CachedPodLoadError {

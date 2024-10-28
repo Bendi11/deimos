@@ -142,18 +142,6 @@ impl DeimosApplication {
 
     fn empty_view(&self) -> Element<DeimosMessage> {
         Column::new()
-            .push(
-                Container::new(
-                    Button::new(
-                        Svg::new(self.settings_icon.clone())
-                            .class((orbit::MERCURY[1], orbit::SOL[0]))
-                            .width(Length::Shrink),
-                    )
-                    .on_press(DeimosMessage::Navigate(DeimosView::Settings)),
-                )
-                .align_right(Length::Fill)
-                .height(Length::Fixed(45f32)),
-            )
             .width(Length::FillPortion(3))
             .into()
     }

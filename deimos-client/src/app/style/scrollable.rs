@@ -7,10 +7,10 @@ use iced::{
     Background, Border, Shadow, Vector,
 };
 
-use super::Theme;
+use super::{container::ContainerClass, orbit, Theme};
 
 impl Theme {
-    fn scrollbar_container(&self) -> container::Style {
+    /*fn scrollbar_container(&self) -> container::Style {
         container::Style {
             text_color: None,
             background: None,
@@ -25,7 +25,7 @@ impl Theme {
                 blur_radius: 0f32,
             },
         }
-    }
+    }*/
 
     fn active_scroll_border(&self) -> Border {
         Border {
@@ -56,14 +56,27 @@ impl Theme {
 }
 
 impl scrollable::Catalog for Theme {
-    type Class<'a> = ();
+    type Class<'a> = ContainerClass;
 
-    fn default<'a>() -> Self::Class<'a> {}
+    fn default<'a>() -> Self::Class<'a> {
+        ContainerClass {
+            background: Some(Background::Color(orbit::NIGHT[1])),
+            radius: Radius::new(5f32),
+            shadow: Some(
+                Shadow {
+                    color: orbit::NIGHT[3],
+                    offset: Vector::ZERO,
+                    blur_radius: 3f32,
+                }
+            )
+        }
+    }
 
-    fn style(&self, _: &Self::Class<'_>, status: scrollable::Status) -> scrollable::Style {
+    fn style(&self, container: &Self::Class<'_>, status: scrollable::Status) -> scrollable::Style {
+        let container = <Self as container::Catalog>::style(self, container);
         match status {
             scrollable::Status::Active | scrollable::Status::Dragged { .. } => scrollable::Style {
-                container: self.scrollbar_container(),
+                container,
                 gap: None,
                 vertical_rail: scrollable::Rail {
                     background: Some(Background::Color(self.bg_light)),
@@ -76,7 +89,7 @@ impl scrollable::Catalog for Theme {
                 horizontal_rail: self.invisible_rail(),
             },
             scrollable::Status::Hovered { .. } => scrollable::Style {
-                container: self.scrollbar_container(),
+                container,
                 gap: None,
                 vertical_rail: scrollable::Rail {
                     background: Some(Background::Color(self.bg_light)),
