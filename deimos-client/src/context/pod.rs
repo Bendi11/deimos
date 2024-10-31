@@ -3,7 +3,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::Context;
+use slotmap::SlotMap;
+
+use super::{Context, PodRef};
 
 /// Data received from a server about a single container, cached locally.
 /// Contains iced handles for resources used to display the container.
@@ -39,7 +41,7 @@ impl Context {
     }
 
     /// Attempt to load all pods from the given local cache directory
-    pub(super) async fn load_cached_pods(cache_dir: PathBuf) -> Vec<CachedPod> {
+    pub(super) async fn load_cached_pods(cache_dir: PathBuf) -> SlotMap<PodRef, CachedPod> {
         if !cache_dir.exists() {
             if let Err(e) = tokio::fs::create_dir(&cache_dir).await {
                 tracing::error!(
@@ -58,11 +60,11 @@ impl Context {
                     cache_dir.display(),
                     e
                 );
-                return vec![];
+                return SlotMap::default();
             }
         };
 
-        let mut pods = Vec::new();
+        let mut pods = SlotMap::<PodRef, CachedPod>::default();
 
         loop {
             let entry = match iter.next_entry().await {
@@ -97,7 +99,7 @@ impl Context {
                     };
 
                     let full = CachedPod::load(meta, &path).await;
-                    pods.push(full)
+                    pods.insert(full);
                 }
                 Ok(_) => (),
                 Err(e) => {

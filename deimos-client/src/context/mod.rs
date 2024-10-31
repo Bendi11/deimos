@@ -29,7 +29,7 @@ pub struct Context {
     /// State of API connection, determined from gRPC status codes when operations fail
     conn: ContextConnectionState,
     /// Client for the gRPC API
-    api: Option<Arc<Mutex<DeimosServiceClient<Channel>>>>,
+    api: Arc<Mutex<DeimosServiceClient<Channel>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,24 +57,6 @@ pub struct ContextState {
     pub last_sync: Option<DateTime<Utc>>,
 }
 
-#[derive(Clone, Debug)]
-pub enum ContextMessage {
-    /// Loaded all container data from the local cache
-    Loaded(Vec<CachedPod>),
-    /// gRPC client must be initialized in async context
-    ClientInit(Box<DeimosServiceClient<Channel>>),
-    /// Upate from API methods informing new connection state
-    ConnectionStatus(ContextConnectionState),
-    /// Received a listing of containers from the server, so update our local cache to match.
-    /// Also remove any containers if their IDs are not contained in the given response
-    BeginSynchronizeFromQuery(deimosproto::QueryPodsResponse),
-    /// Received all container data including images, so update our in memory data
-    SynchronizePod(Box<CachedPod>),
-    /// Notification received from the server
-    Notification(deimosproto::PodStatusNotification),
-    /// An error occured in a future
-    Error,
-}
 
 impl Context {
     pub const CACHE_DIR_NAME: &str = "deimos";
@@ -103,66 +85,9 @@ impl Context {
         }
     }
 
-    async fn subscribe_pod_logs(
-        api: Arc<Mutex<DeimosServiceClient<Channel>>>,
-        id: String,
-    ) -> Option<impl Stream<Item = Vec<u8>>> {
-        match api.lock().await.subscribe_pod_logs(deimosproto::PodLogStreamRequest { id: id.clone() }).await {
-            Ok(stream) => Some(
-                stream.into_inner().filter_map(|chunk| async move { chunk.ok().map(|chunk| chunk.chunk) })
-            ),
-            Err(e) => {
-                tracing::error!("Failed to subscribe to pod {} logs: {}", id, e);
-                None
-            }
-        }
-    }
-
-    /// Subscribe to container status updates from the server
-    fn subscription(
-        api: Arc<Mutex<DeimosServiceClient<Channel>>>,
-    ) -> impl Stream<Item = ContextMessage> {
-        async_stream::stream! {
-            loop {
-                let mut stream = {
-                    let mut api = api.lock().await;
-                    match api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {}).await {
-                        Ok(stream) => {
-                            yield ContextMessage::ConnectionStatus(ContextConnectionState::Connected);
-                            stream.into_inner()
-                        },
-                        Err(e) => match e.code() {
-                            tonic::Code::Unavailable => {
-                                yield ContextMessage::ConnectionStatus(ContextConnectionState::Error);
-                                continue
-                            },
-                            _ => {
-                                tracing::error!("Failed to subscribe to pod status stream: {e}");
-                                continue
-                            }
-                        }
-                    }
-                };
-
-                while let Some(event) = stream.next().await {
-                    match event {
-                        Ok(event) => {
-                            yield ContextMessage::Notification(event)
-                        },
-                        Err(e) => {
-                            tracing::error!("Failed to read pod status notification: {e}");
-                        },
-                    }
-                }
-
-                tracing::warn!("Container status notification stream closed, attempting to reopen");
-            }
-        }
-    }
-
     /// Load all context state from the local cache directory and begin connection attempts to the
     /// gRPC server with the loaded settings
-    pub fn load() -> Self {
+    pub async fn load() -> Self {
         let cache_dir = match dirs::cache_dir() {
             Some(dir) => dir.join(Self::CACHE_DIR_NAME),
             None => PathBuf::from("./deimos-cache"),
@@ -176,38 +101,24 @@ impl Context {
             }
         };
         
+        let pods = Self::load_cached_pods(cache_dir.clone()).await;
+        let api = Arc::new(Mutex::new(Self::connect_api(state.settings.clone()).await));
         let conn = ContextConnectionState::Unknown;
-        let api = None;
         let state = state;
-        let containers = SlotMap::<PodRef, CachedPod>::default();
 
         Self {
             state,
             api,
             conn,
-            pods: containers,
+            pods,
             cache_dir,
         }
-    }
-    
-    fn get_pod_ref(&self, id: &str) -> Option<PodRef> {
-        self.pods
-            .iter()
-            .find_map(|(k, v)| (v.data.id == id).then_some(k))
-    }
-
-    fn get_pod(&self, id: &str) -> Option<&CachedPod> {
-        self.get_pod_ref(id).and_then(|r| self.pods.get(r))
-    }
-
-    fn get_pod_mut(&mut self, id: &str) -> Option<&mut CachedPod> {
-        self.get_pod_ref(id).and_then(|r| self.pods.get_mut(r))
     }
 
 
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
-    async fn connect_api(settings: ContextSettings) -> Box<DeimosServiceClient<Channel>> {
+    async fn connect_api(settings: ContextSettings) -> DeimosServiceClient<Channel> {
         let channel = Channel::builder(settings.server_uri.clone())
             .tls_config(ClientTlsConfig::new().with_webpki_roots())
             .unwrap()
@@ -215,7 +126,7 @@ impl Context {
             .timeout(settings.request_timeout)
             .connect_lazy();
 
-        Box::new(DeimosServiceClient::new(channel))
+        DeimosServiceClient::new(channel)
     }
 }
 

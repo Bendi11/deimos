@@ -1,8 +1,10 @@
-use fltk::{enums::{Color, ColorDepth, Font}, frame::Frame, group::Flex, image::{RgbImage, SvgImage}, prelude::{GroupExt, ImageExt, WidgetExt}};
+use fltk::{enums::{Color, Font}, frame::Frame, group::Flex, image::{RgbImage, SvgImage}, prelude::{GroupExt, ImageExt, WidgetExt}};
 
 
 
-pub struct Header;
+pub struct Header {
+    row: Flex,
+}
 
 impl Header {
     pub fn create<P: GroupExt>(parent: &mut P) -> Self {
@@ -18,11 +20,9 @@ impl Header {
         deimos_icon.normalize();
         let mut rgb = deimos_icon.to_rgb_data();
         for buf in rgb.chunks_mut(4) {
-            if buf[3] != 0 {
-                buf[0] = 0x96;
-                buf[1] = 0x46;
-                buf[2] = 0x32;
-            }
+            buf[0] = 0x96;
+            buf[1] = 0x46;
+            buf[2] = 0x32;
         }
 
         let rgb_image = unsafe { RgbImage::from_data(&rgb, deimos_icon.data_w(), deimos_icon.data_h(), fltk::enums::ColorDepth::Rgba8) }.unwrap();
@@ -42,6 +42,16 @@ impl Header {
 
         row.add(&title_frame);
 
-        Self
+        Self {
+            row
+        }
+    }
+
+    pub const fn group(&self) -> &impl GroupExt {
+        &self.row
+    }
+
+    pub fn group_mut(&mut self) -> &mut impl GroupExt {
+        &mut self.row
     }
 }
