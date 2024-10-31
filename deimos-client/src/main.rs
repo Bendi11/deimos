@@ -1,6 +1,5 @@
 use std::process::ExitCode;
 
-use app::DeimosApplication;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, FmtSubscriber};
 
@@ -23,5 +22,5 @@ async fn main() -> ExitCode {
 
     subscriber.with(filter).init();
 
-    DeimosApplication::run().await
+    app::run().await
 }

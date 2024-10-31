@@ -1,5 +1,7 @@
 use fltk::{enums::{Color, Font}, frame::Frame, group::Flex, image::{RgbImage, SvgImage}, prelude::{GroupExt, ImageExt, WidgetExt}};
 
+use super::{orbit, widget};
+
 
 
 pub struct Header {
@@ -14,25 +16,14 @@ impl Header {
         row.end();
         parent.add(&row);
 
-        let mut deimos_icon = SvgImage::from_data(include_str!("../../assets/mars-deimos.svg"))
-            .unwrap()
-            .copy_sized(row.width(), row.height());
-        deimos_icon.normalize();
-        let mut rgb = deimos_icon.to_rgb_data();
-        for buf in rgb.chunks_mut(4) {
-            buf[0] = 0x96;
-            buf[1] = 0x46;
-            buf[2] = 0x32;
-        }
+        let deimos_icon = SvgImage::from_data(include_str!("../../assets/mars-deimos.svg"))
+            .unwrap();
 
-        let rgb_image = unsafe { RgbImage::from_data(&rgb, deimos_icon.data_w(), deimos_icon.data_h(), fltk::enums::ColorDepth::Rgba8) }.unwrap();
-
-        let mut icon_frame = Frame::default()
-            .with_size(row.height(), row.height());
-        icon_frame.set_image_scaled(Some(rgb_image));
-
-
-        row.add(&icon_frame);
+        let deimos_rgb = widget::svg::svg_color(deimos_icon, row.height(), orbit::MARS[2]);
+        let mut frame = Frame::default();
+        frame.set_size(row.height(), row.height());
+        frame.set_image(Some(deimos_rgb));
+        row.add(&frame);
 
         let mut title_frame = Frame::default()
             .with_label("Deimos");
