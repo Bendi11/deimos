@@ -22,4 +22,4 @@ version = "1.40"
 [workspace.dependencies.tonic]
 version = "0.12"
 default-features = false
-features = ["codegen", "tls", "prost"]
+features = ["codegen", "prost", "tls", "tls-webpki-roots"]

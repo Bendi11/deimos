@@ -1,10 +1,11 @@
 use std::process::ExitCode;
 
+use app::DeimosApplication;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, FmtSubscriber};
 
-pub mod app;
 pub mod context;
+pub mod app;
 
 fn main() -> ExitCode {
     let filter = tracing_subscriber::filter::Targets::new()
@@ -21,5 +22,5 @@ fn main() -> ExitCode {
 
     subscriber.with(filter).init();
 
-    app::DeimosApplication::run()
+    DeimosApplication::run()
 }

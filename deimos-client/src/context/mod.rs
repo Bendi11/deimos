@@ -1,13 +1,13 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
-use deimosproto::{DeimosServiceClient, PodLogStreamRequest};
+use deimosproto::DeimosServiceClient;
+use futures::{Stream, StreamExt};
 use http::Uri;
-use iced::futures::{Stream, StreamExt};
-use pod::{CachedPod, CachedPodData, CachedPodState};
+use pod::CachedPod;
 use slotmap::SlotMap;
 use tokio::sync::Mutex;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, ClientTlsConfig};
 
 mod load;
 pub mod pod;
@@ -118,13 +118,6 @@ impl Context {
         }
     }
 
-    pub fn pod_logs(&self, pod: PodRef) -> iced::Task<Vec<u8>> {
-        let Some(api) = self.api.clone() else { return iced::Task::none() };
-        let Some(id) = self.pods.get(pod).map(|pod| pod.data.id.clone()) else { return iced::Task::none() };
-        iced::Task::future(Self::subscribe_pod_logs(api, id))
-            .and_then(iced::Task::stream)
-    }
-
     /// Subscribe to container status updates from the server
     fn subscription(
         api: Arc<Mutex<DeimosServiceClient<Channel>>>,
@@ -167,13 +160,6 @@ impl Context {
         }
     }
 
-    /// Start a task to process container status notifications
-    fn pod_notification_task(
-        api: Arc<Mutex<DeimosServiceClient<Channel>>>,
-    ) -> iced::Task<ContextMessage> {
-        iced::Task::stream(Self::subscription(api))
-    }
-
     /// Load all context state from the local cache directory and begin connection attempts to the
     /// gRPC server with the loaded settings
     pub fn load() -> Self {
@@ -204,19 +190,6 @@ impl Context {
         }
     }
     
-    /// Perform all initialization after loading context state from a cache directory, including
-    /// loading all cached containers and initiating a connection to the API
-    pub fn post_load_init(&self) -> iced::Task<ContextMessage> {
-        iced::Task::perform(
-            Self::load_cached_pods(self.cache_dir.clone()),
-            ContextMessage::Loaded,
-        )
-        .chain(iced::Task::perform(
-            Self::connect_api(self.state.settings.clone()),
-            ContextMessage::ClientInit,
-        ))
-    }
-
     fn get_pod_ref(&self, id: &str) -> Option<PodRef> {
         self.pods
             .iter()
@@ -231,184 +204,13 @@ impl Context {
         self.get_pod_ref(id).and_then(|r| self.pods.get_mut(r))
     }
 
-    pub fn update(&mut self, msg: ContextMessage) -> iced::Task<ContextMessage> {
-        match msg {
-            ContextMessage::ConnectionStatus(conn) => {
-                self.conn = conn;
-                iced::Task::none()
-            },
-            ContextMessage::Loaded(pods) => {
-                for c in pods {
-                    self.pods.insert(c);
-                }
-                iced::Task::none()
-            }
-            ContextMessage::ClientInit(api) => {
-                let api = Arc::new(Mutex::new(*api));
-                self.api = Some(api.clone());
-                Self::pod_notification_task(api)
-            }
-            ContextMessage::BeginSynchronizeFromQuery(resp) => {
-                self.begin_synchronize_from_query(resp)
-            }
-            ContextMessage::SynchronizePod(pod) => {
-                match self.get_pod_ref(&pod.data.id) {
-                    Some(exist) => {
-                        self.pods[exist] = *pod;
-                    }
-                    None => {
-                        self.pods.insert(*pod);
-                    }
-                }
-
-                iced::Task::none()
-            }
-            ContextMessage::Notification(notify) => {
-                match self.get_pod_mut(&notify.id) {
-                    Some(pod) => {
-                        tracing::trace!("Got status notification for {}", notify.id);
-                        pod.data.up = match deimosproto::PodState::try_from(notify.state)
-                            .map(CachedPodState::from)
-                        {
-                            Ok(up) => up.into(),
-                            Err(_) => {
-                                tracing::error!(
-                                    "Unknown up status {} received for pod '{}'",
-                                    notify.state,
-                                    notify.id
-                                );
-                                return iced::Task::none();
-                            }
-                        };
-                        iced::Task::none()
-                    }
-                    None => {
-                        tracing::error!("Got status notification for unknown pod '{}', attempting synchronization", notify.id);
-                        self.synchronize_from_server()
-                    }
-                }
-            }
-            ContextMessage::Error => iced::Task::none(),
-        }
-    }
-
-    /// Synchronize all container data from the server and update our local cache
-    pub fn synchronize_from_server(&self) -> iced::Task<ContextMessage> {
-        let Some(api) = self.api.clone() else {
-            return iced::Task::none();
-        };
-        iced::Task::future(async move {
-            let mut api = api.lock().await;
-            match api.query_pods(deimosproto::QueryPodsRequest {}).await {
-                Ok(resp) => ContextMessage::BeginSynchronizeFromQuery(resp.into_inner()),
-                Err(e) => {
-                    tracing::error!("Failed to query pods from server: {e}");
-                    ContextMessage::Error
-                }
-            }
-        })
-    }
-
-    /// Change the given container's status on the server
-    pub fn update_pod(&mut self, pod: PodRef, run: CachedPodState) -> iced::Task<ContextMessage> {
-        let id = match self.pods.get_mut(pod) {
-            Some(pod) => pod.data.id.clone(),
-            None => {
-                tracing::warn!(
-                    "Got update container message for unknown container '{:?}'",
-                    pod
-                );
-                return iced::Task::none();
-            }
-        };
-
-        let Some(api) = self.api.clone() else {
-            return iced::Task::none();
-        };
-        iced::Task::future(async move {
-            let mut api = api.lock().await;
-            let method: deimosproto::PodState = run.into();
-            if let Err(e) = api
-                .update_pod(deimosproto::UpdatePodRequest {
-                    id: id.clone(),
-                    method: method as i32,
-                })
-                .await
-            {
-                tracing::error!("Failed to update pod {}: {}", id, e);
-            }
-        })
-        .discard()
-    }
-
-    /// Start synchronizing the local cache items from the given list of containers on the server
-    fn begin_synchronize_from_query(
-        &mut self,
-        resp: deimosproto::QueryPodsResponse,
-    ) -> iced::Task<ContextMessage> {
-        self.pods.retain(|_, exist| {
-            let present = resp.pods.iter().any(|c| c.id == exist.data.id);
-            if !present {
-                tracing::trace!(
-                    "Removing pod {} - was not contained in server's response",
-                    exist.data.id
-                );
-            }
-
-            present
-        });
-
-        let tasks = resp.pods.into_iter().filter_map(|new| {
-            let up = match deimosproto::PodState::try_from(new.state).map(CachedPodState::from) {
-                Ok(up) => up,
-                Err(_) => {
-                    tracing::error!(
-                        "Failed to decode up status of pod '{}', defaulting to dead",
-                        new.id
-                    );
-                    CachedPodState::Disabled
-                }
-            };
-
-            let data = CachedPodData {
-                id: new.id,
-                name: new.title,
-                up: up.into(),
-            };
-
-            match self.get_pod_mut(&data.id) {
-                Some(local) => {
-                    local.data = data;
-                    None
-                }
-                None => {
-                    tracing::info!("Got new container {} from server", data.id);
-                    self.pods.insert(CachedPod { data });
-                    None
-                }
-            }
-        });
-
-        iced::Task::batch(tasks)
-    }
-
-    /// Restart the client, applying any connection parameter changes since the last connection
-    pub fn reload_settings(&self) -> iced::Task<ContextMessage> {
-        let Some(api) = self.api.clone() else {
-            return iced::Task::none();
-        };
-        let settings = self.state.settings.clone();
-        iced::Task::future(async move {
-            let mut api = api.lock().await;
-            *api = *Self::connect_api(settings).await;
-        })
-        .discard()
-    }
 
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
     async fn connect_api(settings: ContextSettings) -> Box<DeimosServiceClient<Channel>> {
         let channel = Channel::builder(settings.server_uri.clone())
+            .tls_config(ClientTlsConfig::new().with_webpki_roots())
+            .unwrap()
             .connect_timeout(settings.connect_timeout)
             .timeout(settings.request_timeout)
             .connect_lazy();

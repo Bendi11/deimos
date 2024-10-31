@@ -5,7 +5,8 @@ use bytes::Bytes;
 use futures::StreamExt;
 use igd_next::PortMappingProtocol;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
+use tonic::transport::{Server, ServerTlsConfig};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::pod::docker::logs::PodLogStream;
 use crate::pod::id::DeimosId;
@@ -61,7 +62,24 @@ impl ApiState {
     
     /// Apply settings given in the API configuration to create a new gRPC server
     async fn init_server(config: &ApiConfig) -> Result<Server, ApiInitError> {
-        let server = Server::builder().timeout(config.timeout);
+        let certificate = deimosproto::util::load_check_permissions(&config.certificate)
+            .await
+            .map(Zeroizing::new)
+            .map_err(|err| ApiInitError::LoadSensitiveFile(config.privkey.clone(), err))?;
+        let privkey = deimosproto::util::load_check_permissions(&config.privkey)
+            .await
+            .map(Zeroizing::new)
+            .map_err(|err| ApiInitError::LoadSensitiveFile(config.certificate.clone(), err))?;
+
+        let identity = tonic::transport::Identity::from_pem(certificate, privkey);
+
+        let server = Server::builder()
+            .timeout(config.timeout)
+            .tls_config(
+                ServerTlsConfig::new()
+                    .identity(identity)
+            )?;
+
         Ok(server)
     }
 }
@@ -244,7 +262,7 @@ pub enum ApiInitError {
     #[error("Failed to load sensitive file {}: {}", .0.display(), .1)]
     LoadSensitiveFile(PathBuf, std::io::Error),
     #[error("Failed to set server TLS configuration: {}", .0)]
-    TlsConfig(tonic::transport::Error),
+    TlsConfig(#[from] tonic::transport::Error),
 }
 
 impl ApiConfig {
