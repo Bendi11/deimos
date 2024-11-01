@@ -8,10 +8,10 @@ use super::Overview;
 impl Overview {
     pub fn header<P: GroupExt>(state: DeimosStateHandle, parent: &P) -> Flex {
         let mut row = Flex::default()
-            .row()
-            .with_size(parent.width(), parent.height() / 7);
+            .with_size(parent.width(), parent.height() / 7)
+            .row();
         row.end();
-        row.set_margins(8, 16, 8, 8);
+        row.set_margins(32, 16, 8, 16);
 
         let deimos_icon = SvgImage::from_data(include_str!("../../../assets/mars-deimos.svg"))
             .unwrap();
@@ -19,8 +19,9 @@ impl Overview {
         let deimos_rgb = widget::svg::svg_color(deimos_icon, row.height(), orbit::MARS[2]);
         let mut frame = Frame::default();
         frame.set_size(row.height(), row.height());
-        frame.set_image(Some(deimos_rgb));
+        frame.set_image_scaled(Some(deimos_rgb));
         row.add(&frame);
+        row.fixed(&frame, row.height());
 
         let mut title_frame = Frame::default()
             .with_label("Deimos");

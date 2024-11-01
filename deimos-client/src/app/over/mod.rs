@@ -1,4 +1,4 @@
-use fltk::{enums::{Font, FrameType}, frame::Frame, group::{Flex, Group, Scroll}, image::SvgImage, prelude::{GroupExt, WidgetExt}};
+use fltk::{enums::{Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll}, image::SvgImage, prelude::{GroupExt, WidgetExt}};
 
 use crate::context::pod::CachedPod;
 
@@ -19,13 +19,19 @@ impl Overview {
         top.end();
         top.hide();
 
-        let header = Self::header(state.clone(), &top);
-        top.add(&header);
+        let mut column = Flex::default().column().size_of(&top);
+        column.end();
+        top.add(&column);
+
+        let header = Self::header(state.clone(), &column);
+        column.fixed(&header, header.height());
+        column.add(&header);
 
         let mut pods_scroll = Scroll::default();
+        pods_scroll.set_frame(FrameType::NoBox);
+        pods_scroll.set_color(orbit::NIGHT[1]);
         pods_scroll.end();
-        pods_scroll.set_size(parent.width(), 1000);
-        top.add(&pods_scroll);
+        column.add(&pods_scroll);
 
         Self {
             top,

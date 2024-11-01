@@ -68,12 +68,13 @@ pub async fn run() -> ExitCode {
     window.add(&overview.group());
     let settings = Settings::new(state.clone(), &window);
     window.add(&settings.group());
-    settings.group().show();
+    
+    overview.group().show();
 
     let _ = state.0.set(
         DeimosState {
             ctx,
-            active: Mutex::new(settings.group().clone()),
+            active: Mutex::new(overview.group()),
             settings,
             overview,
         }
