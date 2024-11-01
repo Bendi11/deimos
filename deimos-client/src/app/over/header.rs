@@ -1,4 +1,4 @@
-use fltk::{enums::Font, frame::Frame, group::{Flex, Group}, image::SvgImage, prelude::{GroupExt, WidgetExt}};
+use fltk::{enums::{Align, Font}, frame::Frame, group::{Flex, Group, Pack, PackType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
 use crate::app::{orbit, widget, DeimosStateHandle};
 
@@ -6,22 +6,27 @@ use super::Overview;
 
 
 impl Overview {
-    pub fn header<P: GroupExt>(state: DeimosStateHandle, parent: &P) -> Flex {
-        let mut row = Flex::default()
-            .with_size(parent.width(), parent.height() / 7)
-            .row();
+    pub fn header(state: DeimosStateHandle) -> impl GroupExt {
+        
+
+        let mut row = Flex::default_fill()
+            .row()
+            .with_align(Align::Center);
         row.end();
-        row.set_margins(32, 16, 8, 16);
+        row.set_margins(8, 0, 0, 8);
 
         let deimos_icon = SvgImage::from_data(include_str!("../../../assets/mars-deimos.svg"))
             .unwrap();
-
-        let deimos_rgb = widget::svg::svg_color(deimos_icon, row.height(), orbit::MARS[2]);
-        let mut frame = Frame::default();
-        frame.set_size(row.height(), row.height());
-        frame.set_image_scaled(Some(deimos_rgb));
+        let deimos_rgb = widget::svg::svg_color(deimos_icon, 128, orbit::MARS[2]);
+        let mut frame = Frame::default().with_size(64, 64);
+        frame.resize_callback(|f, _, _, _, _| {
+            if let Some(mut image) = f.image() {
+                image.scale(f.height(), f.height(), true, true);
+                f.redraw();
+            }
+        });
+        frame.set_image(Some(deimos_rgb));
         row.add(&frame);
-        row.fixed(&frame, row.height());
 
         let mut title_frame = Frame::default()
             .with_label("Deimos");
@@ -31,13 +36,26 @@ impl Overview {
         row.add(&title_frame);
 
         let settings_icon = SvgImage::from_data(include_str!("../../../assets/settings.svg")).unwrap();
-        let settings_rgb = widget::svg::svg_color(settings_icon, row.height() / 2, orbit::MERCURY[2]);
+        let settings_rgb = widget::svg::svg_color(settings_icon, 128, orbit::MERCURY[2]);
         let mut settings_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
         settings_button.set_image(Some(settings_rgb));
         settings_button.set_callback(move |_| state.clone().set_view(state.settings.group()));
+        settings_button.resize_callback(
+            |f,_,_,_,_| {
+                if let Some(mut image) = f.image() {
+                    image.scale(f.height(), f.height(), true, true);
+                    f.redraw();
+                }
+            }
+        );
 
         row.add(&settings_button);
-        row.fixed(&settings_button, row.height() / 2);
+        row.fixed(&settings_button, row.height());
+        row.resize_callback(move |r,_,_,_,_| {
+            //settings_button.set_size(r.height() - 16, r.height() - 16);
+            r.fixed(&settings_button, r.height() - 16);
+            r.fixed(&frame, r.height());
+        });
 
         row
     }

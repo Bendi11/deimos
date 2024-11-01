@@ -59,15 +59,15 @@ pub async fn run() -> ExitCode {
     window.make_resizable(true);
     window.set_label("Deimos");
 
-    window.end();
-    window.show();
-
     let state = DeimosStateHandle::default();
     
-    let overview = Overview::new(state.clone(), &window);
-    window.add(&overview.group());
+    let overview = Overview::new(state.clone());
+    window.resizable(&overview.group());
     let settings = Settings::new(state.clone(), &window);
     window.add(&settings.group());
+
+    window.end();
+    window.show();
     
     overview.group().show();
 
