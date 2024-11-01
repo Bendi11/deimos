@@ -26,7 +26,7 @@ pub fn button(color: Color, hovered: Color) -> Button {
                 true
             },
             Event::Released => {
-                b.set_color(hovered);
+                b.set_color(color);
                 b.redraw();
                 true
             },

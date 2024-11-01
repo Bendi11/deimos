@@ -15,11 +15,11 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn new<P: GroupExt>(state: DeimosStateHandle, parent: &mut P) -> Self {
+    pub fn new<P: GroupExt>(state: DeimosStateHandle, parent: &P) -> Self {
         let mut top = Group::default()
             .with_size(parent.width(), parent.height());
         top.end();
-        parent.add(&top);
+        top.hide();
 
         let mut column = Flex::default()
             .column()
@@ -38,19 +38,7 @@ impl Settings {
         let mut save_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
         save_button.set_size(top_bar.height(), top_bar.height());
         save_button.set_image_scaled(Some(save_img));
-
-        
-        save_button.set_callback(
-            move |_| {
-                let state = state.clone();
-                tokio::spawn(async move {
-                    let mut guard = state.active.lock().await;
-                    guard.hide();
-                    *guard = state.header.group().clone();
-                    guard.show();
-                });
-            }
-        );
+        save_button.set_callback(move |_| state.clone().set_view(state.overview.group()));
         top_bar.add(&save_button);
 
         column.add(&top_bar);
@@ -84,11 +72,7 @@ impl Settings {
         }
     }
 
-    pub const fn group(&self) -> &Group {
-        &self.top
-    }
-
-    pub fn group_mut(&mut self) -> &mut Group {
-        &mut self.top
+    pub fn group(&self) -> Group {
+        self.top.clone()
     }
 }

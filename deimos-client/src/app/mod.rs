@@ -1,8 +1,8 @@
 use std::{ops::Deref, process::ExitCode, sync::Arc};
 
 use fltk::{app::App, group::Group, prelude::{GroupExt, WidgetExt}, window::Window};
-use header::Header;
 use once_cell::sync::OnceCell;
+use over::Overview;
 use settings::Settings;
 use tokio::sync::Mutex;
 
@@ -11,7 +11,7 @@ use crate::context::Context;
 
 pub mod orbit;
 pub mod widget;
-pub mod header;
+pub mod over;
 mod settings;
 
 
@@ -19,7 +19,7 @@ pub struct DeimosState {
     ctx: Context,
     active: Mutex<Group>,
     settings: Settings,
-    header: Header,
+    overview: Overview,
 }
 
 #[derive(Clone, Default)]
@@ -29,6 +29,20 @@ impl Deref for DeimosStateHandle {
     type Target = DeimosState;
     fn deref(&self) -> &Self::Target {
         self.0.wait()
+    }
+}
+
+impl DeimosStateHandle {
+    /// Hide the current view widget and show the given group
+    pub fn set_view(self, group: Group) {
+        tokio::spawn(
+            async move {
+                let mut active = self.active.lock().await;
+                active.hide();
+                *active = group;
+                active.show();
+            }
+        );
     }
 }
 
@@ -49,18 +63,19 @@ pub async fn run() -> ExitCode {
     window.show();
 
     let state = DeimosStateHandle::default();
-
-    let settings = Settings::new(state.clone(), &mut window);
-    let mut header = Header::create(state.clone(), &mut window);
     
-    header.group_mut().hide();
+    let overview = Overview::new(state.clone(), &window);
+    window.add(&overview.group());
+    let settings = Settings::new(state.clone(), &window);
+    window.add(&settings.group());
+    settings.group().show();
 
     let _ = state.0.set(
         DeimosState {
             ctx,
             active: Mutex::new(settings.group().clone()),
             settings,
-            header,
+            overview,
         }
     );
 
