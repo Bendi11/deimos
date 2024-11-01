@@ -1,26 +1,33 @@
 use std::sync::Arc;
 
-use fltk::{button::Button, enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Pack, PackType}, image::SvgImage, input::Input, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{button::Button, enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType}, image::SvgImage, input::Input, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use once_cell::sync::OnceCell;
 
 use crate::context::Context;
 
-use super::{orbit, widget};
+use super::{orbit, widget, DeimosState, DeimosStateHandle};
 
 
 pub struct Settings {
+    top: Group,
     column: Flex,
     host_url: Input,
 }
 
 impl Settings {
-    pub fn new<P: GroupExt>(ctx: Arc<Context>, parent: &mut P) -> Self {
+    pub fn new<P: GroupExt>(state: DeimosStateHandle, parent: &mut P) -> Self {
+        let mut top = Group::default()
+            .with_size(parent.width(), parent.height());
+        top.end();
+        parent.add(&top);
+
         let mut column = Flex::default()
             .column()
             .with_size(parent.width() - 32, parent.height())
             .center_of(parent);
         column.end();
         column.set_color(orbit::NIGHT[2]);
-        parent.add(&column);
+        top.add(&column);
 
         let mut top_bar = Pack::default();
         top_bar.set_size(column.width(), 42);
@@ -31,7 +38,19 @@ impl Settings {
         let mut save_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
         save_button.set_size(top_bar.height(), top_bar.height());
         save_button.set_image_scaled(Some(save_img));
-        save_button.visible_focus(false);
+
+        
+        save_button.set_callback(
+            move |_| {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    let mut guard = state.active.lock().await;
+                    guard.hide();
+                    *guard = state.header.group().clone();
+                    guard.show();
+                });
+            }
+        );
         top_bar.add(&save_button);
 
         column.add(&top_bar);
@@ -59,16 +78,17 @@ impl Settings {
         column.fixed(&host_url, 40);
 
         Self {
+            top,
             column,
             host_url,
         }
     }
 
-    pub const fn group(&self) -> &impl GroupExt {
-        &self.column
+    pub const fn group(&self) -> &Group {
+        &self.top
     }
 
-    pub fn group_mut(&mut self) -> &mut impl GroupExt {
-        &mut self.column
+    pub fn group_mut(&mut self) -> &mut Group {
+        &mut self.top
     }
 }

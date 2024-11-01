@@ -5,12 +5,13 @@ use std::{
     time::Duration,
 };
 
-use bollard::Docker;
+use bollard::{secret::{EventActor, EventMessageTypeEnum}, system::EventsOptions, Docker};
+use dashmap::DashMap;
 use futures::{
     stream::SelectAll,
     StreamExt,
 };
-use id::DeimosId;
+use id::{DeimosId, DockerId};
 
 use crate::server::upnp::Upnp;
 
@@ -29,6 +30,7 @@ pub struct PodManager {
     docker: Docker,
     upnp: Upnp,
     pods: HashMap<DeimosId, Arc<Pod>>,
+    reverse_lookup: DashMap<DockerId, Arc<Pod>>,
 }
 
 pub type PodStateStreamMapper = dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync;
@@ -69,11 +71,14 @@ impl PodManager {
             tracing::warn!("Starting pod manager with no pods configured");
         }
 
+        let reverse_lookup = DashMap::with_capacity(pods.len());
+
         Ok(Self {
             config,
             docker,
             upnp,
             pods,
+            reverse_lookup,
         })
     }
 
@@ -92,6 +97,62 @@ impl PodManager {
     /// Get a reference to the pod with the given ID
     pub fn get(&self, id: &str) -> Option<Arc<Pod>> {
         self.pods.get(id).cloned()
+    }
+    
+    /// Process all Docker container events in a loop to monitor uncommanded pod state changes
+    pub async fn eventloop(&self) {
+        loop {
+            let mut filters = HashMap::with_capacity(1);
+            filters.insert("type", vec!["container"]);
+
+            tracing::trace!("Subscribing to Docker event stream with filters {:?}", filters);
+            let mut stream = self.docker.events(
+                Some(
+                    EventsOptions::<&'static str> {
+                        filters,
+                        ..Default::default()
+                    }
+                )
+            );
+
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(ev) => match ev.typ {
+                        Some(EventMessageTypeEnum::CONTAINER) => {
+                            let Some(actor) = ev.actor else {
+                                tracing::warn!("Received container event with no actor");
+                                continue;
+                            };
+
+                            let Some(id) = actor.id else {
+                                tracing::warn!("Received container event with no actor ID");
+                                continue;
+                            };
+
+                            let Some(action) = ev.action else {
+                                tracing::warn!("Received container event with no action");
+                                continue;
+                            };
+
+                            if let Some(pod) = self.pods.get(id.as_str()) {
+                                self.handle_event(pod.clone(), action).await;
+                            }
+                        },
+                        _ => {
+                            tracing::warn!("Got unwanted Docker event {:?}", ev.typ);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("Docker event stream closed unexpectedly: {}", e);
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    async fn handle_event(&self, pod: Arc<Pod>, action: String) {
+        tracing::trace!("Pod {} got event '{}'", pod.id(), action);
     }
 
     /// Load all containers from directory entries in the given containers directory,

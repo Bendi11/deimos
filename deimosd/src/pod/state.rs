@@ -52,8 +52,15 @@ pub struct PodPaused {
 }
 
 impl Deimos {
+    /// Monitor events received from the local Docker instance
     pub async fn pod_task(self: Arc<Self>, cancel: CancellationToken) {
-        cancel.cancelled().await;
+        tokio::select! {
+            _ = cancel.cancelled() => {},
+            _ = self.pods.eventloop() => {
+                tracing::error!("Pod event loop exited");
+            }
+        };
+
         self.pods.disable_all().await;
     }
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use api::{ApiConfig, ApiInitError, ApiState};
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
-use upnp::Upnp;
+use upnp::{Upnp, UpnpConfig};
 
 use crate::pod::{PodManager, PodManagerConfig, PodManagerInitError};
 
@@ -23,6 +23,8 @@ pub struct Deimos {
 pub struct DeimosConfig {
     pub pod: PodManagerConfig,
     pub api: ApiConfig,
+    #[serde(default)]
+    pub upnp: UpnpConfig,
 }
 
 impl Deimos {
@@ -30,7 +32,7 @@ impl Deimos {
     /// and creating a TCP listener for the control interface.
     /// Then run the server until an interrupt signal is received or a fatal error occurs
     pub async fn run(config: DeimosConfig) -> Result<(), DeimosRunError> {
-        let (upnp, upnp_rx) = Upnp::new().await?;
+        let (upnp, upnp_rx) = Upnp::new(config.upnp).await?;
         let api = ApiState::new(&upnp, config.api).await?;
         let pods = PodManager::new(config.pod, upnp.clone()).await?;
         let this = Arc::new(

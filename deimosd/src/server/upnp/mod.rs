@@ -16,6 +16,8 @@ use super::Deimos;
 /// State required to request port forwarding when the server is behind a NAT
 #[derive(Clone)]
 pub struct Upnp {
+    /// Configuration parsed from the global deimos.toml
+    conf: UpnpConfig,
     /// Transmitter sending new UPnP leases to the maintainer thread
     /// when they are accquired
     tx: tokio::sync::mpsc::Sender<u16>,
@@ -23,6 +25,14 @@ pub struct Upnp {
     local_ip: IpAddr,
     /// Map of all active UPnP leases
     leases: UpnpLeases,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct UpnpConfig {
+    #[serde(default="UpnpConfig::default_renewal_seconds")]
+    pub renewal_seconds: u32,
+    #[serde(default)]
+    pub remove_immediate: bool,
 }
 
 pub type UpnpReceiver = tokio::sync::mpsc::Receiver<u16>;
@@ -66,7 +76,7 @@ impl Upnp {
 
     /// Retrieve the local IP address from the network adapter and create an empty map of forwarded
     /// ports
-    pub async fn new() -> Result<(Self, UpnpReceiver), UpnpInitError> {
+    pub async fn new(conf: UpnpConfig) -> Result<(Self, UpnpReceiver), UpnpInitError> {
         let local_ip = local_ip_address::local_ip()?;
         let leases = UpnpLeases::default();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -76,6 +86,7 @@ impl Upnp {
                 local_ip,
                 leases,
                 tx,
+                conf,
             },
             rx
         ))
@@ -202,6 +213,21 @@ impl UpnpLeases {
         for port in ports {
             self.map.remove(&port);
         }
+    }
+}
+
+impl Default for UpnpConfig {
+    fn default() -> Self {
+        Self {
+            renewal_seconds: Self::default_renewal_seconds(),
+            ..Default::default()
+        }
+    }
+}
+
+impl UpnpConfig {
+    pub const fn default_renewal_seconds() -> u32 {
+        60 * 15
     }
 }
 
