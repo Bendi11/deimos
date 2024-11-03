@@ -43,7 +43,8 @@ impl Overview {
                     let mut reload_button = widget::button::button(orbit::NIGHT[2], orbit::NIGHT[0]);
                     servers_container.fixed(&reload_button, servers_container.height());
                     reload_button.set_image(Some(reload_rgb));
-                    reload_button.resize_callback(widget::svg::resize_image_cb(4, 4));
+                    reload_button.set_align(Align::Center);
+                    reload_button.resize_callback(widget::svg::resize_image_cb(0, 0));
                     
                     {
                         let state = state.clone();
@@ -78,7 +79,8 @@ impl Overview {
                         let mut pods_pack_resize = pods_pack.clone();
                         scroll.resize_callback(
                             move |s,_,_,_,_| {
-                                pods_pack_resize.set_size(s.width(), 0);
+                                pods_pack_resize.set_pos(s.x() + 8, s.y() + 4);
+                                pods_pack_resize.set_size(s.width() - 16, 0);
                             }
                         );
 
