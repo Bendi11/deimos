@@ -34,15 +34,16 @@ impl Deref for DeimosStateHandle {
 
 impl DeimosStateHandle {
     /// Hide the current view widget and show the given group
-    pub fn set_view(self, group: Group) {
-        tokio::spawn(
-            async move {
-                let mut active = self.active.lock().await;
-                active.hide();
-                *active = group;
-                active.show();
-            }
-        );
+    pub async fn set_view(&self, group: Group) {
+        fltk::app::lock().ok();
+
+        let mut active = self.active.lock().await;
+        active.hide();
+        *active = group;
+        active.show();
+
+        fltk::app::unlock();
+        fltk::app::awake();
     }
 }
 
@@ -63,8 +64,8 @@ pub async fn run() -> ExitCode {
     
     let overview = Overview::new(state.clone());
     window.resizable(&overview.group());
-    let settings = Settings::new(state.clone(), &window);
-    window.add(&settings.group());
+    let settings = Settings::new(state.clone());
+    window.resizable(&settings.group());
 
     window.end();
     window.show();
@@ -80,19 +81,23 @@ pub async fn run() -> ExitCode {
         }
     );
 
-    /*for pod in ctx.pods.values() {
-        let mut button = Button::default();
-        button.set_size(window.width(), window.height() / 6);
-        button.set_color(Color::from_rgb(0x1b, 0x1b, 0x1c));
-        button.set_label(&pod.data.name);
-        button.set_label_color(Color::from_rgb(0xff, 0xf4, 0xea));
-        window.add(&button);
-    }*/
-
     window.redraw();
 
+    state.ctx.init().await;
+    
+    let ctx_loop = {
+        let state = state.clone();
+        tokio::task::spawn(async move {
+            state.ctx.pod_event_loop().await;
+        })
+    };
+
     match fltk_ev.run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(()) => {
+            ctx_loop.abort();
+            state.ctx.save();
+            ExitCode::SUCCESS
+        },
         Err(e) => {
             tracing::error!("Failed to run FLTK event loop: {}", e);
             ExitCode::FAILURE

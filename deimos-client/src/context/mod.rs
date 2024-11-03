@@ -1,11 +1,11 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{borrow::Borrow, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use deimosproto::DeimosServiceClient;
 use futures::{Stream, StreamExt};
 use http::Uri;
-use pod::CachedPod;
-use slotmap::SlotMap;
+use im::HashMap;
+use pod::{CachedPod, CachedPodData, CachedPodState};
 use tokio::sync::Mutex;
 use tonic::transport::{Channel, ClientTlsConfig};
 
@@ -16,6 +16,9 @@ slotmap::new_key_type! {
     pub struct PodRef;
 }
 
+#[derive(Debug, Clone)]
+pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
+
 /// Context shared across the application used to perform API requests and maintain a local
 /// container cache.
 #[derive(Debug)]
@@ -23,13 +26,13 @@ pub struct Context {
     /// Context state preserved in save files
     pub state: ContextState,
     /// A map of all loaded containers, to be modified by gRPC notifications
-    pub pods: SlotMap<PodRef, CachedPod>,
+    pub pods: NotifyMutation<HashMap<String, Arc<CachedPod>>>,
     /// Directory that all container data and context state will be saved to
     cache_dir: PathBuf,
     /// State of API connection, determined from gRPC status codes when operations fail
-    conn: ContextConnectionState,
+    conn: NotifyMutation<ContextConnectionState>,
     /// Client for the gRPC API
-    api: Arc<Mutex<DeimosServiceClient<Channel>>>,
+    api: Mutex<DeimosServiceClient<Channel>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,7 +55,7 @@ pub struct ContextSettings {
 /// Persistent state kept for the [Context]'s connection
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextState {
-    pub settings: ContextSettings,
+    pub settings: NotifyMutation<ContextSettings>,
     /// Timestamp of the last container synchronization
     pub last_sync: Option<DateTime<Utc>>,
 }
@@ -66,23 +69,108 @@ impl Context {
         self.save_state();
         self.save_cached_pods();
     }
-
-    async fn subscribe_pod_events(
-        api: Arc<Mutex<DeimosServiceClient<Channel>>>,
-    ) -> impl Stream<Item = Result<deimosproto::PodStatusNotification, tonic::Status>> {
+    
+    /// Wait for pod status notifications and update the local cache with their statuses as
+    /// required
+    pub async fn pod_event_loop(&self) -> ! {
         loop {
-            let result = api
-                .lock()
-                .await
-                .subscribe_pod_status(deimosproto::PodStatusStreamRequest {})
-                .await;
-            match result {
-                Ok(stream) => break stream.into_inner(),
+            let stream = {
+                let mut api = self.api.lock().await;
+                api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {}).await
+            };
+
+            let mut stream = match stream {
+                Ok(stream) => stream.into_inner(),
                 Err(e) => {
-                    tracing::error!("Failed to subscribe to pod status notifications: {e}");
+                    tracing::warn!("Failed to subscribe to pod status stream: {}", e);
+                    continue
+                }
+            };
+            
+            while let Some(event) = stream.next().await {
+                let event = match event {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        tracing::warn!("Error when receiving pod status stream: {}", e);
+                        break
+                    }
+                };
+
+                let pod_state = {
+                    let read = self.pods.read();
+                    read.get(&event.id).map(|pod| pod.data.up.clone())
+                };
+
+                match pod_state {
+                    Some(up) => {
+                        tracing::trace!("Got pod status notification for {}", event.id);
+                        up.set(CachedPodState::from(event.state())).await;
+                    },
+                    None => {
+                        tracing::warn!("Got pod status notification for unknown container {}", event.id);
+                    }
                 }
             }
         }
+    }
+    
+    /// Attempt to update the status of the given pod
+    pub async fn update(&self, pod: &CachedPod, up: CachedPodState) {
+        let mut api = self.api.lock().await;
+        
+        let request = deimosproto::UpdatePodRequest {
+            id: pod.data.id.clone(),
+            method: deimosproto::PodState::from(up) as i32,
+        };
+
+        match api.update_pod(request).await {
+            Ok(_) => {
+                tracing::trace!("Successfully updated pod {} state to {:?}", pod.data.id, up);
+            },
+            Err(e) => {
+                tracing::error!("Failed to update pod {} state: {}", pod.data.id, e);
+            }
+        }
+    }
+    
+    /// Query the server for a list of containers and update our local cache in response
+    pub async fn synchronize(&self) {
+        let mut api = self.api.lock().await;
+        let brief = match api.query_pods(deimosproto::QueryPodsRequest {}).await {
+            Ok(r) => r.into_inner(),
+            Err(e) => {
+                tracing::error!("Failed to query pods from server: {}", e);
+                return
+            }
+        };
+
+        let mut pods = self.pods.read().clone();
+        pods.retain(|id, _| brief.pods.iter().any(|recv| recv.id == *id));
+
+        for pod in brief.pods {
+            match pods.get_mut(&pod.id) {
+                Some(exist) => {
+                    exist.data.up.set(CachedPodState::from(pod.state())).await;
+                    //exist.data.name = pod.title;
+                },
+                None => {
+                    tracing::trace!("Received new pod {} from server", pod.id);
+                    let data = CachedPodData {
+                        up: NotifyMutation::new(CachedPodState::from(pod.state())),
+                        id: pod.id,
+                        name: pod.title,
+                    };
+
+                    let pod = CachedPod {
+                        data,
+                    };
+
+                    pods.insert(pod.data.id.clone(), Arc::new(pod));
+                }
+            }
+        }
+
+        self.pods.set(pods).await;
     }
 
     /// Load all context state from the local cache directory and begin connection attempts to the
@@ -101,10 +189,9 @@ impl Context {
             }
         };
         
-        let pods = Self::load_cached_pods(cache_dir.clone()).await;
-        let api = Arc::new(Mutex::new(Self::connect_api(state.settings.clone()).await));
-        let conn = ContextConnectionState::Unknown;
-        let state = state;
+        let pods = NotifyMutation::new(HashMap::default());
+        let api = Mutex::new(Self::connect_api(state.settings.read().clone()).await);
+        let conn = NotifyMutation::new(ContextConnectionState::Unknown);
 
         Self {
             state,
@@ -113,6 +200,17 @@ impl Context {
             pods,
             cache_dir,
         }
+    }
+
+    pub async fn init(&self) {
+        self.pods.set(Self::load_cached_pods(self.cache_dir.clone()).await).await;
+        self.state.settings.notify().await;
+    }
+    
+    /// Reload the API connection using the given context settings
+    pub async fn reload(&self, settings: ContextSettings) {
+        let (_, mut api) = tokio::join!(self.state.settings.set(settings.clone()), self.api.lock());
+        *api = Self::connect_api(settings).await;
     }
 
 
@@ -133,12 +231,60 @@ impl Context {
 impl Default for ContextState {
     fn default() -> Self {
         Self {
-            settings: ContextSettings {
-                server_uri: Uri::default(),
-                request_timeout: Duration::from_secs(30),
-                connect_timeout: Duration::from_secs(60),
-            },
+            settings: NotifyMutation::new(
+                ContextSettings {
+                    server_uri: Uri::default(),
+                    request_timeout: Duration::from_secs(30),
+                    connect_timeout: Duration::from_secs(60),
+                }
+            ),
             last_sync: None,
         }
+    }
+}
+
+impl<T> NotifyMutation<T> {
+    /// Create a new wrapper that will notify UI elements of mutations to the given value
+    pub fn new(val: T) -> Self {
+        let (tx, _) = tokio::sync::watch::channel(val);
+        tx.send_modify(|_| ());
+        Self(tx)
+    }
+    
+    /// Get a receiver that will notify tasks when the given value is mutated
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<T> {
+        self.0.subscribe()
+    }
+    
+    /// Get the current value
+    pub fn read(&self) -> tokio::sync::watch::Ref<T> {
+        self.0.borrow()
+    }
+    
+    /// Set the current value, notifying all waiting tasks of a mutation
+    pub async fn set(&self, val: T) {
+        let _ = self.0.send_replace(val);
+    }
+    
+    /// Notify waiting subscribers without modifying the contained value
+    pub async fn notify(&self) {
+        self.0.send_modify(|_| ());
+    }
+}
+
+impl<T: serde::Serialize> serde::Serialize for NotifyMutation<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        self.0.borrow().serialize(serializer)
+    }
+}
+
+impl<'a, T: serde::Deserialize<'a>> serde::Deserialize<'a> for NotifyMutation<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'a> {
+        T::deserialize(deserializer)
+            .map(|val| Self(tokio::sync::watch::channel(val).0))
     }
 }

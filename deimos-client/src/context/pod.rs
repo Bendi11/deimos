@@ -1,11 +1,11 @@
 use std::{
     io::Write,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, sync::Arc,
 };
 
-use slotmap::SlotMap;
+use im::HashMap;
 
-use super::{Context, PodRef};
+use super::{Context, NotifyMutation};
 
 /// Data received from a server about a single container, cached locally.
 /// Contains iced handles for resources used to display the container.
@@ -19,7 +19,7 @@ pub struct CachedPod {
 pub struct CachedPodData {
     pub id: String,
     pub name: String,
-    pub up: CachedPodState,
+    pub up: NotifyMutation<CachedPodState>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -33,7 +33,7 @@ pub enum CachedPodState {
 impl Context {
     /// Save all cached pod state to the local cache directory
     pub fn save_cached_pods(&self) {
-        for container in self.pods.values() {
+        for container in self.pods.read().values() {
             if let Err(e) = container.save(&self.cache_dir) {
                 tracing::error!("Failed to save container {}: {}", container.data.id, e);
             }
@@ -41,7 +41,7 @@ impl Context {
     }
 
     /// Attempt to load all pods from the given local cache directory
-    pub(super) async fn load_cached_pods(cache_dir: PathBuf) -> SlotMap<PodRef, CachedPod> {
+    pub(super) async fn load_cached_pods(cache_dir: PathBuf) -> HashMap<String, Arc<CachedPod>> {
         if !cache_dir.exists() {
             if let Err(e) = tokio::fs::create_dir(&cache_dir).await {
                 tracing::error!(
@@ -60,11 +60,11 @@ impl Context {
                     cache_dir.display(),
                     e
                 );
-                return SlotMap::default();
+                return HashMap::default();
             }
         };
 
-        let mut pods = SlotMap::<PodRef, CachedPod>::default();
+        let mut pods = HashMap::default();
 
         loop {
             let entry = match iter.next_entry().await {
@@ -99,7 +99,7 @@ impl Context {
                     };
 
                     let full = CachedPod::load(meta, &path).await;
-                    pods.insert(full);
+                    pods.insert(full.data.id.clone(), Arc::new(full));
                 }
                 Ok(_) => (),
                 Err(e) => {
