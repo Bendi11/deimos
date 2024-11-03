@@ -8,7 +8,6 @@ use dashmap::DashMap;
 use igd_next::aio::tokio::Tokio;
 use igd_next::aio::Gateway;
 use igd_next::PortMappingProtocol;
-use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use super::Deimos;
@@ -220,7 +219,7 @@ impl Default for UpnpConfig {
     fn default() -> Self {
         Self {
             renewal_seconds: Self::default_renewal_seconds(),
-            ..Default::default()
+            remove_immediate: false,
         }
     }
 }

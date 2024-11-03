@@ -1,4 +1,4 @@
-use fltk::{enums::{Align, Font}, frame::Frame, group::{Flex, Group, Pack, PackType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
+use fltk::{enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
 use crate::app::{orbit, widget, DeimosStateHandle};
 

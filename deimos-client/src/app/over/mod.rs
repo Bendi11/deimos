@@ -67,6 +67,7 @@ impl Overview {
                         scroll.set_frame(FrameType::NoBox);
                         scroll.set_color(orbit::NIGHT[2]);
                         scroll.set_type(ScrollType::Vertical);
+                        scroll.set_align(Align::Center | Align::Inside);
                         
                         let mut pods_pack = Pack::default_fill();
                         pods_pack.set_spacing(32);
@@ -77,8 +78,7 @@ impl Overview {
                         let mut pods_pack_resize = pods_pack.clone();
                         scroll.resize_callback(
                             move |s,_,_,_,_| {
-                                pods_pack_resize.set_pos(8, s.y() + 2);
-                                pods_pack_resize.set_size(s.width() - 16, 0);
+                                pods_pack_resize.set_size(s.width(), 0);
                             }
                         );
 
@@ -133,21 +133,28 @@ impl Overview {
     pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupExt {
         let mut row = Flex::new(0, 0, 0, 64, "").row();
         
-        {
+        let up_state = {
             let mut column = Flex::default().column();
             column.set_frame(FrameType::RShadowBox);
             column.set_color(orbit::NIGHT[1]);
             column.set_margins(8, 8, 0, 8);
 
-            let mut data = Frame::default();
-            data.set_label(&pod.data.name);
-            data.set_label_font(Font::CourierBold);
-            data.set_label_color(orbit::SOL[1]);
-            data.set_align(Align::Inside | Align::TopLeft);
-            data.set_label_size(16);
+            let mut title = Frame::default();
+            title.set_label(&pod.data.name);
+            title.set_label_font(Font::CourierBold);
+            title.set_label_color(orbit::SOL[1]);
+            title.set_align(Align::Inside | Align::TopLeft);
+            title.set_label_size(16);
+
+            let mut up_state = Frame::default();
+            up_state.set_label_font(Font::Screen);
+            up_state.set_align(Align::Inside | Align::Left);
+            up_state.set_label_size(12);
 
             column.end();
-        }
+
+            up_state
+        };
         
         let start_svg = SvgImage::from_data(include_str!("../../../assets/start.svg")).unwrap();
         let start_rgb = widget::svg::svg_color(start_svg, 128, orbit::MERCURY[1]);
@@ -163,6 +170,7 @@ impl Overview {
         button.resize_callback(widget::svg::resize_image_cb(16, 16));
 
         {
+            let mut up_state = up_state.clone();
             let mut button = button.clone();
             let up = pod.data.up.clone();
             tokio::task::spawn(async move {
@@ -170,14 +178,23 @@ impl Overview {
                 loop {
                     fltk::app::lock().unwrap();
                     match *sub.borrow_and_update() {
-                        CachedPodState::Disabled | CachedPodState::Paused => {
+                        CachedPodState::Paused => {
+                            up_state.set_label("Paused");
+                            up_state.set_label_color(orbit::MERCURY[2]);
+                            button.set_image_scaled(Some(start_rgb.clone()));
+                        }
+                        CachedPodState::Disabled => {
+                            up_state.set_label("Disabled");
+                            up_state.set_label_color(orbit::NIGHT[0].lighter());
                             button.set_image_scaled(Some(start_rgb.clone()));
                         },
                         CachedPodState::Transit => {
+                            up_state.set_label("");
                             button.set_image_scaled(Some(load_rgb.clone()));
-                            tracing::trace!("Set transit");
                         },
                         CachedPodState::Enabled => {
+                            up_state.set_label("Enabled");
+                            up_state.set_label_color(orbit::EARTH[1]);
                             button.set_image_scaled(Some(stop_rgb.clone()));
                         }
                     }

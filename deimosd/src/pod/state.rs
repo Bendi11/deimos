@@ -25,7 +25,7 @@ pub struct PodStateWriteHandle<'a> {
 }
 
 /// Current state of a pod - including if the state is currently unknown and being modified
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PodState {
     Disabled,
     Transit,
@@ -113,8 +113,11 @@ impl PodStateHandle {
 
     /// Lock the handle to allow mutations to the current state
     pub async fn lock(&self) -> PodStateWriteHandle {
+        let lock = self.lock.lock().await;
+        self.tx.send_replace(PodState::Transit);
+
         PodStateWriteHandle {
-            lock: self.lock.lock().await,
+            lock,
             tx: self.tx.clone(),
         }
     }
@@ -149,6 +152,14 @@ impl<'a> PodStateWriteHandle<'a> {
     pub fn set(&mut self, state: PodStateKnown) {
         self.tx.send_replace((&state).into());
         *self.lock = state;
+    }
+}
+
+impl Drop for PodStateWriteHandle<'_> {
+    fn drop(&mut self) {
+        if *self.tx.borrow() == PodState::Transit {
+            self.tx.send_modify(|_| ());
+        }
     }
 }
 

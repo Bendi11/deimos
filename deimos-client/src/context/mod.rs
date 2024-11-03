@@ -82,6 +82,14 @@ impl Context {
             let mut stream = match stream {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
+                    if e.code() != tonic::Code::DeadlineExceeded {
+                        let timeout = {
+                            let settings = self.state.settings.read();
+                            settings.connect_timeout
+                        };
+
+                        tokio::time::sleep(timeout).await;
+                    }
                     tracing::warn!("Failed to subscribe to pod status stream: {}", e);
                     continue
                 }
@@ -103,7 +111,7 @@ impl Context {
 
                 match pod_state {
                     Some(up) => {
-                        tracing::trace!("Got pod status notification for {}", event.id);
+                        tracing::trace!("Got pod status notification for {} - {:?}", event.id, event.state());
                         up.set(CachedPodState::from(event.state())).await;
                     },
                     None => {

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::{pod::{config::PodDockerConfig, id::DockerId, state::PodEnable, Pod, PodManager, PodStateKnown}, server::upnp::UpnpLeaseData};
+use crate::{pod::{config::PodDockerConfig, id::{DeimosId, DockerId}, state::PodEnable, Pod, PodManager, PodStateKnown}, server::upnp::UpnpLeaseData};
 
 impl PodManager {
     /// Top-level operation to enable the given pod.
@@ -15,7 +15,7 @@ impl PodManager {
             .filter(|port| port.upnp)
             .map(|port| 
                 UpnpLeaseData {
-                    name: format!("deimos.{}", pod.id()),
+                    name: format!("deimos.{}", <DeimosId as std::borrow::Borrow<str>>::borrow(&pod.id())),
                     port: port.expose,
                     protocol: port.protocol.into()
                 }
