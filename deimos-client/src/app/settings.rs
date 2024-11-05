@@ -1,6 +1,6 @@
 use std::{path::PathBuf, str::FromStr, time::Duration};
 
-use fltk::{dialog::NativeFileChooser, enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{FileInput, Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{dialog::NativeFileChooser, enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
 use crate::context::ContextSettings;

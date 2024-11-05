@@ -1,19 +1,24 @@
-use std::{borrow::Borrow, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use chrono::{DateTime, Utc};
 use deimosproto::DeimosServiceClient;
 use futures::StreamExt;
 use http::Uri;
 use im::HashMap;
 use pod::{CachedPod, CachedPodData, CachedPodState};
 use tokio::sync::Mutex;
-use tonic::transport::{Channel, ClientTlsConfig};
+use tonic::{service::Interceptor, transport::{Channel, ClientTlsConfig}};
+use zeroize::Zeroizing;
 
+mod authentication;
 mod load;
 pub mod pod;
 
 #[derive(Debug, Clone)]
 pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
+
+struct AuthenticationInterceptor(Zeroizing<Vec<u8>>);
+
+type ApiClient = DeimosServiceClient<tonic::service::interceptor::InterceptedService<Channel, AuthenticationInterceptor>>;
 
 /// Context shared across the application used to perform API requests and maintain a local
 /// container cache.
@@ -28,7 +33,7 @@ pub struct Context {
     /// State of API connection, determined from gRPC status codes when operations fail
     pub conn: NotifyMutation<ContextConnectionState>,
     /// Client for the gRPC API
-    api: Mutex<Option<DeimosServiceClient<Channel>>>,
+    api: Mutex<Option<ApiClient>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +50,30 @@ pub struct ContextSettings {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
-    pub token_path: PathBuf,
+    pub token: PersistentToken,
+}
+
+/// A token stored in the context save file - this may be encrypted with platform-specific APIs
+/// and may need to be decrypted before use with an [AuthenticationInterceptor]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub enum PersistentToken {
+    Plaintext(#[serde(with = "serde_bytes")] Vec<u8>),
+    Dpapi(#[serde(with = "serde_bytes")] Vec<u8>)
+}
+
+impl PersistentToken {
+
+}
+
+impl Drop for PersistentToken {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        let buf = match self {
+            Self::Plaintext(ref mut b) => b,
+            Self::Dpapi(ref mut b) => b,
+        };
+        buf.zeroize();
+    }
 }
 
 /// Persistent state kept for the [Context]'s connection
@@ -79,8 +107,8 @@ impl Context {
 
     async fn wrapper<'a, T, F: futures::Future<Output = Result<T, tonic::Status>> + 'a>(
         &self,
-        api: &'a mut DeimosServiceClient<Channel>,
-        req: impl FnOnce(&'a mut DeimosServiceClient<Channel>) -> F
+        api: &'a mut ApiClient,
+        req: impl FnOnce(&'a mut ApiClient) -> F
     ) -> Result<T, tonic::Status> {
         self.result_wrapper(req(api).await).await
     }
@@ -248,7 +276,7 @@ impl Context {
 
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
-    async fn connect_api(settings: ContextSettings) -> Option<DeimosServiceClient<Channel>> {
+    async fn connect_api(settings: ContextSettings) -> Option<ApiClient> {
         let channel = Channel::builder(settings.server_uri.clone())
             .tls_config(ClientTlsConfig::new().with_webpki_roots())
             .ok()?
@@ -257,8 +285,14 @@ impl Context {
             .connect_lazy();
 
         Some(
-            DeimosServiceClient::new(channel)
+            DeimosServiceClient::with_interceptor(channel, AuthenticationInterceptor())
         )
+    }
+}
+
+impl Interceptor for AuthenticationInterceptor {
+    fn call(&mut self, request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+    
     }
 }
 

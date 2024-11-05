@@ -350,13 +350,16 @@ dependencies = [
  "im",
  "once_cell",
  "serde",
+ "serde_bytes",
  "serde_json",
  "thiserror",
  "tokio",
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "winapi",
  "winresource",
+ "zeroize",
 ]
 
 [[package]]
@@ -1515,6 +1518,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bytes"
+version = "0.11.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "387cc504cb06bb40a96c8e04e951fe01854cf6bc921053c954e4a606d9675c6a"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.210"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2414,6 +2426,7 @@ version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 
