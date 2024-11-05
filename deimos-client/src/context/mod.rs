@@ -2,7 +2,7 @@ use std::{borrow::Borrow, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use deimosproto::DeimosServiceClient;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use http::Uri;
 use im::HashMap;
 use pod::{CachedPod, CachedPodData, CachedPodState};
@@ -32,7 +32,7 @@ pub struct Context {
     /// State of API connection, determined from gRPC status codes when operations fail
     conn: NotifyMutation<ContextConnectionState>,
     /// Client for the gRPC API
-    api: Mutex<DeimosServiceClient<Channel>>,
+    api: Mutex<Option<DeimosServiceClient<Channel>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +49,8 @@ pub struct ContextSettings {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
-
+    pub certificate_path: PathBuf,
+    pub privkey_path: PathBuf,
 }
 
 /// Persistent state kept for the [Context]'s connection
@@ -75,7 +76,14 @@ impl Context {
     pub async fn pod_event_loop(&self) -> ! {
         loop {
             let stream = {
-                let mut api = self.api.lock().await;
+                let Some(ref mut api) = *self.api.lock().await else {
+                    let timeout = {
+                        let r = self.state.settings.read();
+                        r.connect_timeout
+                    };
+                    tokio::time::sleep(timeout).await;
+                    continue
+                };
                 api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {}).await
             };
 
@@ -124,7 +132,7 @@ impl Context {
     
     /// Attempt to update the status of the given pod
     pub async fn update(&self, pod: &CachedPod, up: CachedPodState) {
-        let mut api = self.api.lock().await;
+        let Some(ref mut api) = *self.api.lock().await else { return };
         
         let request = deimosproto::UpdatePodRequest {
             id: pod.data.id.clone(),
@@ -143,7 +151,7 @@ impl Context {
     
     /// Query the server for a list of containers and update our local cache in response
     pub async fn synchronize(&self) {
-        let mut api = self.api.lock().await;
+        let Some(ref mut api) = *self.api.lock().await else { return };
         let brief = match api.query_pods(deimosproto::QueryPodsRequest {}).await {
             Ok(r) => r.into_inner(),
             Err(e) => {
@@ -224,29 +232,37 @@ impl Context {
 
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
-    async fn connect_api(settings: ContextSettings) -> DeimosServiceClient<Channel> {
+    async fn connect_api(settings: ContextSettings) -> Option<DeimosServiceClient<Channel>> {
         let channel = Channel::builder(settings.server_uri.clone())
             .tls_config(ClientTlsConfig::new().with_webpki_roots())
-            .unwrap()
+            .ok()?
             .connect_timeout(settings.connect_timeout)
             .timeout(settings.request_timeout)
             .connect_lazy();
 
-        DeimosServiceClient::new(channel)
+        Some(
+            DeimosServiceClient::new(channel)
+        )
     }
 }
 
 impl Default for ContextState {
     fn default() -> Self {
         Self {
-            settings: NotifyMutation::new(
-                ContextSettings {
-                    server_uri: Uri::default(),
-                    request_timeout: Duration::from_secs(30),
-                    connect_timeout: Duration::from_secs(60),
-                }
-            ),
+            settings: NotifyMutation::new(ContextSettings::default()),
             last_sync: None,
+        }
+    }
+}
+
+impl Default for ContextSettings {
+    fn default() -> Self {
+        Self {
+            server_uri: Uri::default(),
+            request_timeout: Duration::from_secs(30),
+            connect_timeout: Duration::from_secs(60),
+            certificate_path: PathBuf::from("./cert.pem"),
+            privkey_path: PathBuf::from("./key.pem"),
         }
     }
 }

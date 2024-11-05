@@ -7,6 +7,9 @@ pub mod button;
 
 pub fn orbit_scheme() {
     fltk::app::reload_scheme().ok();
+
+    let (sr, sg, sb) = orbit::EARTH[1].to_rgb();
+    fltk::app::set_selection_color(sr, sg, sb);
     fltk::app::set_frame_type(FrameType::RShadowBox);
     fltk::app::set_frame_type_cb(FrameType::RShadowBox, rshadow_box_cb, 2, 2, 2, 2);
     fltk::app::set_frame_type_cb(FrameType::RoundDownBox, rshadow_box_cb, 2, 2, 2, 2);

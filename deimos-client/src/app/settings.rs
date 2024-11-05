@@ -1,6 +1,6 @@
 use std::{str::FromStr, time::Duration};
 
-use fltk::{enums::{Align, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{dialog::NativeFileChooser, enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
 use crate::context::ContextSettings;
@@ -43,6 +43,20 @@ impl Settings {
         let mut host_url = Self::input_box::<Input>(&mut column, "Host URL");
         let mut request_timeout = Self::input_box::<IntInput>(&mut column, "gRPC Request Timeout (seconds)");
         let mut connect_timeout = Self::input_box::<IntInput>(&mut column, "gRPC Connection Timeout (seconds)");
+
+        let mut file_select = NativeFileChooser::new(fltk::dialog::FileDialogType::BrowseFile);
+
+        Self::input_lbl(&mut column, "SSL Certificate Path");
+        let mut cert_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+        column.fixed(&cert_button, 32);
+        cert_button.set_label("Select");
+        cert_button.set_label_font(Font::Screen);
+        cert_button.set_callback(
+            move |_| {
+                file_select.show();
+            }
+        );
+         
         
         {
             let state = state.clone();
@@ -74,37 +88,39 @@ impl Settings {
         top.end();
     
         save_button.set_callback(move |_| {
-            let server_uri = match Uri::from_str(&host_url.value()) {
-                Ok(url) => url,
-                Err(e) => {
-                    tracing::debug!("Invalid URI in settings: {}", e);
-                    host_url.set_text_color(orbit::MARS[1]);
-                    return
+            fltk::app::lock().ok();
+            
+            fn parse_from<T, I: InputExt, M: FnOnce(String) -> Option<T>>(input: &mut I, map: M) -> Option<T> {
+                match map(input.value()) {
+                    None => {
+                        input.set_text_color(orbit::MARS[1]);
+                        input.redraw();
+                        None
+                    },
+                    val => val,
                 }
-            };
+            }
 
-            let request_timeout = match u64::from_str(&request_timeout.value()) {
-                Ok(t) => Duration::from_secs(t),
-                Err(e) => {
-                    tracing::debug!("Invalid request timeout: {}", e);
-                    request_timeout.set_text_color(orbit::MARS[1]);
-                    return
-                }
-            };
+            let server_uri = parse_from(&mut host_url, |val| Uri::from_str(&val).ok());
+            let request_timeout = parse_from(&mut request_timeout, |val| u64::from_str(&val).ok().map(Duration::from_secs));
+            let connect_timeout = parse_from(&mut connect_timeout, |val| u64::from_str(&val).ok().map(Duration::from_secs));
+            
+            fltk::app::unlock();
+            fltk::app::awake();
 
-            let connect_timeout = match u64::from_str(&connect_timeout.value()) {
-                Ok(t) => Duration::from_secs(t),
-                Err(e) => {
-                    tracing::debug!("Invalid connect timeout: {}", e);
-                    connect_timeout.set_text_color(orbit::MARS[1]);
-                    return
-                }
+            let (
+                Some(server_uri),
+                Some(request_timeout),
+                Some(connect_timeout)
+            ) = (server_uri, request_timeout, connect_timeout) else {
+                return
             };
-
-            let settings = ContextSettings {
+            
+            let settings =  ContextSettings {
                 server_uri,
                 request_timeout,
                 connect_timeout,
+                ..Default::default()
             };
 
             tracing::trace!("Got new settings {:?}", settings);
@@ -127,13 +143,18 @@ impl Settings {
         self.top.clone()
     }
 
-    fn input_box<I: InputExt + Default>(column: &mut Flex, label: &str) -> I {
+    fn input_lbl(column: &mut Flex, label: &str) -> Frame {
         let mut host_lbl = Frame::default();
         column.fixed(&host_lbl, 32);
         host_lbl.set_align(Align::Inside | Align::Left);
         host_lbl.set_label_color(orbit::SOL[0]);
         host_lbl.set_label(label);
         host_lbl.set_label_size(18);
+        host_lbl
+    }
+
+    fn input_box<I: InputExt + Default>(column: &mut Flex, label: &str) -> I {
+        Self::input_lbl(column, label);
 
         let mut input = I::default();
         column.fixed(&input, 40);
@@ -144,6 +165,13 @@ impl Settings {
         input.set_cursor_color(orbit::SOL[0]);
         input.set_color(orbit::NIGHT[1]);
         input.set_label_color(orbit::SOL[0]);
+        input.set_trigger(CallbackTrigger::Changed);
+        input.set_callback(|i| {
+            if i.text_color() != orbit::MERCURY[1] {
+                i.set_text_color(orbit::MERCURY[1]);
+                i.redraw();
+            }
+        });
 
         input
     }
