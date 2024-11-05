@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use fltk::{enums::{Align, CallbackTrigger, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
+use fltk::{enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
 use crate::context::pod::{CachedPod, CachedPodState};
 

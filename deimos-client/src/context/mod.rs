@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use deimosproto::DeimosServiceClient;
@@ -12,10 +12,6 @@ use tonic::transport::{Channel, ClientTlsConfig};
 mod load;
 pub mod pod;
 
-slotmap::new_key_type! {
-    pub struct PodRef;
-}
-
 #[derive(Debug, Clone)]
 pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
 
@@ -27,10 +23,10 @@ pub struct Context {
     pub state: ContextState,
     /// A map of all loaded containers, to be modified by gRPC notifications
     pub pods: NotifyMutation<HashMap<String, Arc<CachedPod>>>,
+    /// State of API connection, determined from gRPC status codes when operations fail
+    pub conn: NotifyMutation<ContextConnectionState>,
     /// Directory that all container data and context state will be saved to
     cache_dir: PathBuf,
-    /// State of API connection, determined from gRPC status codes when operations fail
-    conn: NotifyMutation<ContextConnectionState>,
     /// Client for the gRPC API
     api: Mutex<Option<DeimosServiceClient<Channel>>>,
 }
@@ -71,6 +67,18 @@ impl Context {
         self.save_cached_pods();
     }
     
+    /// Update the current connection state using the results of the given gRPC request
+    pub async fn handle_grpc_status(&self, err: &tonic::Status) {
+        match err.code() {
+            tonic::Code::Ok => {
+                self.conn.set(ContextConnectionState::Connected).await;
+            },
+            _ => {
+                self.conn.set(ContextConnectionState::Error).await;
+            }
+        }
+    }
+    
     /// Wait for pod status notifications and update the local cache with their statuses as
     /// required
     pub async fn pod_event_loop(&self) -> ! {
@@ -90,6 +98,8 @@ impl Context {
             let mut stream = match stream {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
+                    self.handle_grpc_status(&e).await;
+
                     if e.code() != tonic::Code::DeadlineExceeded {
                         let timeout = {
                             let settings = self.state.settings.read();
@@ -102,15 +112,20 @@ impl Context {
                     continue
                 }
             };
+
+            self.conn.set(ContextConnectionState::Connected).await;
             
             while let Some(event) = stream.next().await {
                 let event = match event {
                     Ok(ev) => ev,
                     Err(e) => {
+                        self.handle_grpc_status(&e).await;
                         tracing::warn!("Error when receiving pod status stream: {}", e);
                         break
                     }
                 };
+
+                self.conn.set(ContextConnectionState::Connected).await;
 
                 let pod_state = {
                     let read = self.pods.read();
@@ -141,9 +156,11 @@ impl Context {
 
         match api.update_pod(request).await {
             Ok(_) => {
+                self.conn.set(ContextConnectionState::Connected).await;
                 tracing::trace!("Successfully updated pod {} state to {:?}", pod.data.id, up);
             },
             Err(e) => {
+                self.handle_grpc_status(&e).await;
                 tracing::error!("Failed to update pod {} state: {}", pod.data.id, e);
             }
         }
@@ -155,10 +172,13 @@ impl Context {
         let brief = match api.query_pods(deimosproto::QueryPodsRequest {}).await {
             Ok(r) => r.into_inner(),
             Err(e) => {
+                self.handle_grpc_status(&e).await;
                 tracing::error!("Failed to query pods from server: {}", e);
                 return
             }
         };
+
+        self.conn.set(ContextConnectionState::Connected).await;
 
         let mut pods = self.pods.read().clone();
         pods.retain(|id, _| brief.pods.iter().any(|recv| recv.id == *id));
@@ -167,7 +187,6 @@ impl Context {
             match pods.get_mut(&pod.id) {
                 Some(exist) => {
                     exist.data.up.set(CachedPodState::from(pod.state())).await;
-                    //exist.data.name = pod.title;
                 },
                 None => {
                     tracing::trace!("Received new pod {} from server", pod.id);

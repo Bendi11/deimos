@@ -4,6 +4,7 @@ authors = ["Ben"]
 version = "0.1.0"
 edition = "2021"
 license = "none"
+dist = false
 
 [dependencies]
 deimosproto = { path = "../deimosproto", features = ["server"] }
@@ -32,6 +33,5 @@ bytes = "1.8"
 chrono = "0.4"
 local-ip-address = "0.6"
 
-[package.metadata.deb]
-maintainer-scripts = "debian"
-systemd-units = { enable = true }
+[package.metadata.dist]
+dist = false
