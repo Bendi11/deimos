@@ -1,4 +1,4 @@
-use fltk::{enums::Color, image::{RgbImage, SvgImage}, prelude::{ImageExt, WidgetBase, WidgetExt}};
+use fltk::{enums::Color, image::{RgbImage, SvgImage}, prelude::{ImageExt, WidgetBase}};
 
 
 pub fn svg_color(img: SvgImage, sz: i32, color: Color) -> RgbImage {
