@@ -1,6 +1,6 @@
-use std::{str::FromStr, time::Duration};
+use std::{path::PathBuf, str::FromStr, time::Duration};
 
-use fltk::{dialog::NativeFileChooser, enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{dialog::NativeFileChooser, enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{FileInput, Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
 use crate::context::ContextSettings;
@@ -46,16 +46,25 @@ impl Settings {
 
         let mut file_select = NativeFileChooser::new(fltk::dialog::FileDialogType::BrowseFile);
 
-        Self::input_lbl(&mut column, "SSL Certificate Path");
+        let mut cert_input = Self::input_box::<Input>(&mut column, "Authentication Token");
+        cert_input.set_text_size(12);
+
         let mut cert_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
         column.fixed(&cert_button, 32);
         cert_button.set_label("Select");
         cert_button.set_label_font(Font::Screen);
-        cert_button.set_callback(
-            move |_| {
-                file_select.show();
-            }
-        );
+        cert_button.set_label_color(orbit::MERCURY[1]);
+        {
+            let mut cert_input = cert_input.clone();
+            cert_button.set_callback(
+                move |_| {
+                    if let Ok(fltk::dialog::FileDialogAction::Success) = file_select.try_show() {
+                        let path = file_select.filename();
+                        cert_input.set_value(path.to_string_lossy().as_ref());
+                    }
+                }
+            );
+        }
          
         
         {
@@ -63,9 +72,10 @@ impl Settings {
             let mut host_url = host_url.clone();
             let mut request_timeout = request_timeout.clone();
             let mut connect_timeout = connect_timeout.clone();
+            let mut cert_input = cert_input.clone();
             tokio::task::spawn(
                 async move {
-                    let mut sub = state.ctx.state.settings.subscribe();
+                    let mut sub = state.ctx.persistent.settings.subscribe();
                     loop {
                         let Ok(_) = sub.changed().await else {
                             break
@@ -78,6 +88,7 @@ impl Settings {
                         host_url.set_value(&settings.server_uri.to_string());
                         request_timeout.set_value(&settings.request_timeout.as_secs().to_string());
                         connect_timeout.set_value(&settings.connect_timeout.as_secs().to_string());
+                        cert_input.set_value(&settings.token_path.to_string_lossy());
 
                         fltk::app::unlock();
                     }
@@ -104,6 +115,7 @@ impl Settings {
             let server_uri = parse_from(&mut host_url, |val| Uri::from_str(&val).ok());
             let request_timeout = parse_from(&mut request_timeout, |val| u64::from_str(&val).ok().map(Duration::from_secs));
             let connect_timeout = parse_from(&mut connect_timeout, |val| u64::from_str(&val).ok().map(Duration::from_secs));
+            let token_path = PathBuf::from(cert_input.value());
             
             fltk::app::unlock();
             fltk::app::awake();
@@ -120,7 +132,7 @@ impl Settings {
                 server_uri,
                 request_timeout,
                 connect_timeout,
-                ..Default::default()
+                token_path,
             };
 
             tracing::trace!("Got new settings {:?}", settings);

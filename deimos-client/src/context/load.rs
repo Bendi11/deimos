@@ -1,17 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use super::{Context, ContextState};
+use super::{Context, ContextPersistent};
 
 impl Context {
     /// File located in the context's cache directory that stores serialized state
     pub const STATE_FILE_NAME: &str = "state.json";
 
     /// Load application context state from the local cache directory, or create a default one
-    pub fn load_state(cache_dir: &Path) -> Result<ContextState, LoadStateError> {
+    pub fn load_state(cache_dir: &Path) -> Result<ContextPersistent, LoadStateError> {
         let config_path = cache_dir.join(Self::STATE_FILE_NAME);
         match std::fs::File::open(&config_path) {
             Ok(rdr) => Ok(
-                serde_json::from_reader::<_, ContextState>(rdr).map_err(|e| LoadStateError {
+                serde_json::from_reader::<_, ContextPersistent>(rdr).map_err(|e| LoadStateError {
                     config_path: config_path.clone(),
                     kind: LoadStateErrorKind::Parse(e),
                 })?,
@@ -32,7 +32,7 @@ impl Context {
                     }
                 }
 
-                let config = ContextState::default();
+                let config = ContextPersistent::default();
 
                 let file = std::fs::File::create(&config_path).map_err(|e| LoadStateError {
                     config_path: config_path.clone(),
@@ -59,7 +59,7 @@ impl Context {
 
         match std::fs::File::create(&state_path) {
             Ok(w) => {
-                if let Err(e) = serde_json::to_writer::<_, ContextState>(w, &self.state) {
+                if let Err(e) = serde_json::to_writer::<_, ContextPersistent>(w, &self.persistent) {
                     tracing::error!(
                         "Failed to write context state to '{}': {}",
                         state_path.display(),

@@ -164,12 +164,14 @@ impl CachedPod {
     fn save(&self, cache_dir: &Path) -> Result<(), CachedPodSaveError> {
         let dir = self.directory(cache_dir);
         if let Err(e) = std::fs::create_dir(&dir) {
-            tracing::warn!(
-                "Failed to create directory '{}' for pod {}: {}",
-                dir.display(),
-                self.data.id,
-                e
-            );
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                tracing::warn!(
+                    "Failed to create directory '{}' for pod {}: {}",
+                    dir.display(),
+                    self.data.id,
+                    e
+                );
+            }
         }
 
         tracing::trace!("Saving pod {} to {}", self.data.id, dir.display());

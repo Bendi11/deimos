@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{borrow::Borrow, path::PathBuf, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use deimosproto::DeimosServiceClient;
@@ -20,13 +20,13 @@ pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
 #[derive(Debug)]
 pub struct Context {
     /// Context state preserved in save files
-    pub state: ContextState,
+    pub persistent: ContextPersistent,
     /// A map of all loaded containers, to be modified by gRPC notifications
     pub pods: NotifyMutation<HashMap<String, Arc<CachedPod>>>,
-    /// State of API connection, determined from gRPC status codes when operations fail
-    pub conn: NotifyMutation<ContextConnectionState>,
     /// Directory that all container data and context state will be saved to
     cache_dir: PathBuf,
+    /// State of API connection, determined from gRPC status codes when operations fail
+    pub conn: NotifyMutation<ContextConnectionState>,
     /// Client for the gRPC API
     api: Mutex<Option<DeimosServiceClient<Channel>>>,
 }
@@ -45,16 +45,13 @@ pub struct ContextSettings {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
-    pub certificate_path: PathBuf,
-    pub privkey_path: PathBuf,
+    pub token_path: PathBuf,
 }
 
 /// Persistent state kept for the [Context]'s connection
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ContextState {
+pub struct ContextPersistent {
     pub settings: NotifyMutation<ContextSettings>,
-    /// Timestamp of the last container synchronization
-    pub last_sync: Option<DateTime<Utc>>,
 }
 
 
@@ -66,17 +63,26 @@ impl Context {
         self.save_state();
         self.save_cached_pods();
     }
-    
-    /// Update the current connection state using the results of the given gRPC request
-    pub async fn handle_grpc_status(&self, err: &tonic::Status) {
-        match err.code() {
-            tonic::Code::Ok => {
+
+    async fn result_wrapper<T>(&self, res: Result<T, tonic::Status>) -> Result<T, tonic::Status> {
+        match res {
+            Ok(val) => {
                 self.conn.set(ContextConnectionState::Connected).await;
+                Ok(val)
             },
-            _ => {
+            Err(e) => {
                 self.conn.set(ContextConnectionState::Error).await;
+                Err(e)
             }
         }
+    }
+
+    async fn wrapper<'a, T, F: futures::Future<Output = Result<T, tonic::Status>> + 'a>(
+        &self,
+        api: &'a mut DeimosServiceClient<Channel>,
+        req: impl FnOnce(&'a mut DeimosServiceClient<Channel>) -> F
+    ) -> Result<T, tonic::Status> {
+        self.result_wrapper(req(api).await).await
     }
     
     /// Wait for pod status notifications and update the local cache with their statuses as
@@ -86,23 +92,21 @@ impl Context {
             let stream = {
                 let Some(ref mut api) = *self.api.lock().await else {
                     let timeout = {
-                        let r = self.state.settings.read();
+                        let r = self.persistent.settings.read();
                         r.connect_timeout
                     };
                     tokio::time::sleep(timeout).await;
                     continue
                 };
-                api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {}).await
+                self.wrapper(api, |api| api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {})).await
             };
 
             let mut stream = match stream {
                 Ok(stream) => stream.into_inner(),
                 Err(e) => {
-                    self.handle_grpc_status(&e).await;
-
                     if e.code() != tonic::Code::DeadlineExceeded {
                         let timeout = {
-                            let settings = self.state.settings.read();
+                            let settings = self.persistent.settings.read();
                             settings.connect_timeout
                         };
 
@@ -112,20 +116,17 @@ impl Context {
                     continue
                 }
             };
-
-            self.conn.set(ContextConnectionState::Connected).await;
             
             while let Some(event) = stream.next().await {
+                let event = self.result_wrapper(event).await;
+
                 let event = match event {
                     Ok(ev) => ev,
                     Err(e) => {
-                        self.handle_grpc_status(&e).await;
                         tracing::warn!("Error when receiving pod status stream: {}", e);
                         break
                     }
                 };
-
-                self.conn.set(ContextConnectionState::Connected).await;
 
                 let pod_state = {
                     let read = self.pods.read();
@@ -154,13 +155,11 @@ impl Context {
             method: deimosproto::PodState::from(up) as i32,
         };
 
-        match api.update_pod(request).await {
+        match self.wrapper(api, |api| api.update_pod(request)).await {
             Ok(_) => {
-                self.conn.set(ContextConnectionState::Connected).await;
                 tracing::trace!("Successfully updated pod {} state to {:?}", pod.data.id, up);
             },
             Err(e) => {
-                self.handle_grpc_status(&e).await;
                 tracing::error!("Failed to update pod {} state: {}", pod.data.id, e);
             }
         }
@@ -169,16 +168,13 @@ impl Context {
     /// Query the server for a list of containers and update our local cache in response
     pub async fn synchronize(&self) {
         let Some(ref mut api) = *self.api.lock().await else { return };
-        let brief = match api.query_pods(deimosproto::QueryPodsRequest {}).await {
+        let brief = match self.wrapper(api, |api| api.query_pods(deimosproto::QueryPodsRequest {})).await {
             Ok(r) => r.into_inner(),
             Err(e) => {
-                self.handle_grpc_status(&e).await;
                 tracing::error!("Failed to query pods from server: {}", e);
                 return
             }
         };
-
-        self.conn.set(ContextConnectionState::Connected).await;
 
         let mut pods = self.pods.read().clone();
         pods.retain(|id, _| brief.pods.iter().any(|recv| recv.id == *id));
@@ -187,6 +183,7 @@ impl Context {
             match pods.get_mut(&pod.id) {
                 Some(exist) => {
                     exist.data.up.set(CachedPodState::from(pod.state())).await;
+                    //exist.data.name = pod.title;
                 },
                 None => {
                     tracing::trace!("Received new pod {} from server", pod.id);
@@ -220,7 +217,7 @@ impl Context {
             Ok(state) => state,
             Err(e) => {
                 tracing::error!("Failed to load application state: {e}");
-                ContextState::default()
+                ContextPersistent::default()
             }
         };
         
@@ -229,7 +226,7 @@ impl Context {
         let conn = NotifyMutation::new(ContextConnectionState::Unknown);
 
         Self {
-            state,
+            persistent: state,
             api,
             conn,
             pods,
@@ -239,12 +236,12 @@ impl Context {
 
     pub async fn init(&self) {
         self.pods.set(Self::load_cached_pods(self.cache_dir.clone()).await).await;
-        self.state.settings.notify().await;
+        self.persistent.settings.notify().await;
     }
     
     /// Reload the API connection using the given context settings
     pub async fn reload(&self, settings: ContextSettings) {
-        let (_, mut api) = tokio::join!(self.state.settings.set(settings.clone()), self.api.lock());
+        let (_, mut api) = tokio::join!(self.persistent.settings.set(settings.clone()), self.api.lock());
         *api = Self::connect_api(settings).await;
     }
 
@@ -265,11 +262,10 @@ impl Context {
     }
 }
 
-impl Default for ContextState {
+impl Default for ContextPersistent {
     fn default() -> Self {
         Self {
             settings: NotifyMutation::new(ContextSettings::default()),
-            last_sync: None,
         }
     }
 }
@@ -280,8 +276,7 @@ impl Default for ContextSettings {
             server_uri: Uri::default(),
             request_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(60),
-            certificate_path: PathBuf::from("./cert.pem"),
-            privkey_path: PathBuf::from("./key.pem"),
+            token_path: PathBuf::from("."),
         }
     }
 }

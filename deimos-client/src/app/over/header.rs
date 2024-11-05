@@ -26,12 +26,12 @@ impl Overview {
             title_frame.set_label_color(orbit::SOL[0]);
             title_frame.set_label_font(Font::CourierBold);
             title_frame.set_label_size(32);
-            title_col.fixed(&title_frame, 32);
+            title_col.fixed(&title_frame, 34);
 
             let mut connection_status = Frame::default();
             connection_status.set_label_font(Font::Screen);
             connection_status.set_label_size(12);
-            title_col.fixed(&connection_status, 12);
+            title_col.fixed(&connection_status, 16);
             
             let state = state.clone();
             tokio::task::spawn(
