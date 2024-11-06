@@ -1,2 +1,2 @@
-//#[cfg(target_os="windows")]
+//#[cfg(windows)]
 pub mod dpapi;

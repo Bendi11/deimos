@@ -56,23 +56,31 @@ pub struct ContextSettings {
 /// A token stored in the context save file - this may be encrypted with platform-specific APIs
 /// and may need to be decrypted before use with an [AuthenticationInterceptor]
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub enum PersistentToken {
-    Plaintext(#[serde(with = "serde_bytes")] Vec<u8>),
-    Dpapi(#[serde(with = "serde_bytes")] Vec<u8>)
+pub struct PersistentToken {
+    kind: PersistentTokenKind,
+    #[serde(with = "serde_bytes")]
+    data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub enum PersistentTokenKind {
+    Plaintext,
+    Dpapi,
 }
 
 impl PersistentToken {
-
+    pub fn unprotect(&self) -> Result<Vec<u8>, String>  {
+        match self.kind {
+            PersistentTokenKind::Plaintext => Ok(self.data.clone()),
+            PersistentTokenKind::Dpapi => authentication::dpapi::protect(&self.data).map_err(|e| e.to_string()),
+        }
+    }
 }
 
 impl Drop for PersistentToken {
     fn drop(&mut self) {
         use zeroize::Zeroize;
-        let buf = match self {
-            Self::Plaintext(ref mut b) => b,
-            Self::Dpapi(ref mut b) => b,
-        };
-        buf.zeroize();
+        self.data.zeroize();
     }
 }
 
@@ -81,7 +89,6 @@ impl Drop for PersistentToken {
 pub struct ContextPersistent {
     pub settings: NotifyMutation<ContextSettings>,
 }
-
 
 impl Context {
     pub const CACHE_DIR_NAME: &str = "deimos";
