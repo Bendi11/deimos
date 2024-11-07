@@ -1,124 +1,27 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc};
 
+use client::{ContextClients, ContextPersistent};
 use futures::StreamExt;
-use layer::{cancel::{CancelLayer, CancelService}, conn::{ConnectionTracker, ConnectionTrackerLayer}};
-use deimosproto::DeimosServiceClient;
-use http::Uri;
 use im::HashMap;
 use pod::{CachedPod, CachedPodData, CachedPodState};
-use tokio::sync::{Mutex, Notify};
-use tonic::{metadata::MetadataValue, service::Interceptor, transport::{Channel, ClientTlsConfig}};
-use zeroize::Zeroizing;
 
-mod auth;
 mod load;
-mod layer;
+pub mod client;
 pub mod pod;
 
 #[derive(Debug, Clone)]
 pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
 
-#[derive(Clone)]
-struct AuthenticationInterceptor(Option<Zeroizing<Vec<u8>>>);
-
-type ApiClient = DeimosServiceClient<
-    tonic::service::interceptor::InterceptedService<
-        CancelService<ConnectionTracker<Channel>>,
-        AuthenticationInterceptor
-    >
->;
-
 /// Context shared across the application used to perform API requests and maintain a local
 /// container cache.
 #[derive(Debug)]
 pub struct Context {
-    /// Context state preserved in save files
-    pub persistent: ContextPersistent,
     /// A map of all loaded containers, to be modified by gRPC notifications
     pub pods: NotifyMutation<HashMap<String, Arc<CachedPod>>>,
+    /// Pod control and authorization API clients
+    pub clients: ContextClients,
     /// Directory that all container data and context state will be saved to
     cache_dir: PathBuf,
-    /// State of API connection, determined from gRPC status codes when operations fail
-    pub conn: NotifyMutation<ContextConnectionState>,
-    /// Client for the gRPC API
-    api: Mutex<Option<ApiClient>>,
-    /// Notifier that will cancel any pending API requests
-    cancel: Arc<Notify>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContextConnectionState {
-    Unknown,
-    NoToken,
-    Connected,
-    Error,
-}
-
-/// Persistent state kept for the [Context]'s connection
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ContextPersistent {
-    pub settings: NotifyMutation<ContextSettings>,
-    pub token: NotifyMutation<Option<PersistentToken>>,
-}
-
-/// Settings that may be adjusted by the user
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ContextSettings {
-    #[serde(with = "http_serde::uri")]
-    pub server_uri: Uri,
-    pub request_timeout: Duration,
-    pub connect_timeout: Duration,
-}
-
-/// A token stored in the context save file - this may be encrypted with platform-specific APIs
-/// and may need to be decrypted before use with an [AuthenticationInterceptor]
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct PersistentToken {
-    kind: PersistentTokenKind,
-    #[serde(with = "serde_bytes")]
-    data: Vec<u8>,
-}
-
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
-pub enum PersistentTokenKind {
-    Plaintext,
-    #[cfg(windows)]
-    Dpapi,
-}
-
-impl PersistentToken {
-    pub fn protect(kind: PersistentTokenKind, data: Vec<u8>) -> Result<Self, String> {
-        match kind {
-            PersistentTokenKind::Plaintext => Ok(
-                Self {
-                    kind,
-                    data,
-                }
-            ),
-            #[cfg(windows)]
-            PersistentTokenKind::Dpapi => Ok(
-                Self {
-                    kind,
-                    data: auth::dpapi::unprotect(&data).map_err(|e| e.to_string()),      
-                }
-            ),
-        }
-    }
-
-    pub fn unprotect(&self) -> Result<Zeroizing<Vec<u8>>, String>  {
-        match self.kind {
-            PersistentTokenKind::Plaintext => Ok(self.data.clone().into()),
-            #[cfg(windows)]
-            PersistentTokenKind::Dpapi => auth::dpapi::protect(&self.data).map(Into::into).map_err(|e| e.to_string()),
-        }
-    }
-}
-
-impl Drop for PersistentToken {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.data.zeroize();
-    }
 }
 
 impl Context {
@@ -135,10 +38,10 @@ impl Context {
     pub async fn pod_event_loop(&self) -> ! {
         loop {
             let stream = {
-                let mut api = self.api.lock().await;
-                let Some(ref mut api) = *api else {
+                let mut api = self.clients.podapi().await;
+                let Some(ref mut api) = api else {
                     let timeout = {
-                        let r = self.persistent.settings.read();
+                        let r = self.clients.persistent.settings.read();
                         r.connect_timeout
                     };
                     tokio::time::sleep(timeout).await;
@@ -153,7 +56,7 @@ impl Context {
                 Err(e) => {
                     if e.code() != tonic::Code::DeadlineExceeded {
                         let timeout = {
-                            let settings = self.persistent.settings.read();
+                            let settings = self.clients.persistent.settings.read();
                             settings.connect_timeout
                         };
 
@@ -193,7 +96,7 @@ impl Context {
     
     /// Attempt to update the status of the given pod
     pub async fn update(&self, pod: &CachedPod, up: CachedPodState) {
-        let Some(ref mut api) = *self.api.lock().await else { return };
+        let Some(ref mut api) = self.clients.podapi().await else { return };
         
         let request = deimosproto::UpdatePodRequest {
             id: pod.data.id.clone(),
@@ -212,7 +115,7 @@ impl Context {
     
     /// Query the server for a list of containers and update our local cache in response
     pub async fn synchronize(&self) {
-        let Some(ref mut api) = *self.api.lock().await else { return };
+        let Some(ref mut api) = self.clients.podapi().await else { return };
         let brief = match api.query_pods(deimosproto::QueryPodsRequest {}).await {
             Ok(r) => r.into_inner(),
             Err(e) => {
@@ -267,112 +170,21 @@ impl Context {
         };
         
         let pods = NotifyMutation::new(HashMap::default());
-        let api = Mutex::new(None);
-        let conn = NotifyMutation::new(ContextConnectionState::Unknown);
-        let cancel = Arc::new(Notify::new());
+        let clients = ContextClients::new(persistent).await;
 
-        let this = Self {
-            persistent,
-            api,
-            conn,
+        Self {
             pods,
+            clients,
             cache_dir,
-            cancel,
-        };
-
-        this.connect_api().await;
-
-        this
+        }
     }
 
     pub async fn init(&self) {
         self.pods.set(Self::load_cached_pods(self.cache_dir.clone()).await);
-        self.persistent.settings.notify();
-    }
-    
-    /// Reload the API connection using the given context settings
-    pub async fn reload(&self, settings: ContextSettings) {
-        self.persistent.settings.set(settings.clone());
-        self.connect_api().await;
-    }
-
-
-    /// Create a new gRPC client with the given connection settings, used to refresh the connection
-    /// as settings are updated
-    async fn connect_api(&self) {
-        let token = self.persistent.token.read().clone();
-        let token = match token {
-            Some(ref token) => match token.unprotect() {
-                Ok(unprotect) => Some(unprotect),
-                Err(e) => {
-                    tracing::error!("Failed to unprotect token: {}", e);
-                    return
-                }
-            },
-            None => None,
-        };
-        
-        let channel = {
-            let settings = self.persistent.settings.read();
-            Channel::builder(settings.server_uri.clone())
-                .connect_timeout(settings.connect_timeout)
-                .timeout(settings.request_timeout)
-                .tls_config(ClientTlsConfig::new().with_webpki_roots())
-                .ok()
-        };
-
-        let Some(channel) = channel else { return };
-
-        self.cancel.notify_waiters();
-        let mut lock = self.api.lock().await;
-
-        
-        let channel = channel.connect_lazy();
-        let client = DeimosServiceClient::with_interceptor(
-            tower::ServiceBuilder::new()
-                .layer(CancelLayer::new(self.cancel.clone()))
-                .layer(ConnectionTrackerLayer::new(self.conn.clone()))
-                .service(channel),
-            AuthenticationInterceptor(token)
-        );
-        
-        *lock = Some(client);
+        self.clients.persistent.settings.notify();
     }
 }
 
-impl Interceptor for AuthenticationInterceptor {
-    fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
-        if let Some(ref token) = self.0 {
-            request
-                .metadata_mut()
-                .insert_bin(
-                    "authorization-bin",
-                    MetadataValue::from_bytes(token)
-                );
-        }
-
-        Ok(request)
-    }
-}
-
-impl Default for ContextPersistent {
-    fn default() -> Self {
-        Self {
-            settings: NotifyMutation::new(ContextSettings::default()),
-            token: NotifyMutation::new(None),
-        }
-    }
-}
-
-impl Default for ContextSettings {
-    fn default() -> Self {
-        Self {
-            server_uri: Uri::default(),
-            request_timeout: Duration::from_secs(30),
-            connect_timeout: Duration::from_secs(60),
-        }
-    }
-}
 
 impl<T> NotifyMutation<T> {
     /// Create a new wrapper that will notify UI elements of mutations to the given value

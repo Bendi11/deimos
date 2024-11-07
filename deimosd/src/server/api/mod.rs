@@ -113,7 +113,7 @@ impl Deimos {
         let result = server
             .add_service(
                 InterceptedService::new(
-                    proto::DeimosServiceServer::from_arc(self.clone()),
+                    proto::server::DeimosServiceServer::from_arc(self.clone()),
                     self.api.persistent.tokens.clone(),
                 )
             )
@@ -148,7 +148,7 @@ impl From<PodState> for proto::PodState {
 }
 
 #[async_trait]
-impl proto::DeimosService for Deimos {
+impl proto::server::DeimosService for Deimos {
     async fn query_pods(
         self: Arc<Self>,
         _: tonic::Request<proto::QueryPodsRequest>,

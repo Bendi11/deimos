@@ -4,7 +4,7 @@ use pin_project::pin_project;
 use tonic::Code;
 use tower::{Layer, Service};
 
-use crate::context::{ContextConnectionState, NotifyMutation};
+use crate::context::{client::ContextConnectionState, NotifyMutation};
 
 
 /// A [Service] that tracks responses from each request and sets the given connection state

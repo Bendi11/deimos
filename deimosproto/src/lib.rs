@@ -5,9 +5,13 @@ mod proto {
 }
 
 #[cfg(feature = "server")]
-pub use proto::deimos_service_server::*;
+pub use proto::deimos_service_server as server;
+#[cfg(feature = "server")]
+pub use proto::deimos_authorization_server as authserver;
 
 #[cfg(feature = "channel")]
-pub use proto::deimos_service_client::*;
+pub use proto::deimos_service_client as client;
+#[cfg(feature = "channel")]
+pub use proto::deimos_authorization_client as authclient;
 
 pub use proto::*;

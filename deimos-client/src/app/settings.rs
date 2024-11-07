@@ -3,7 +3,7 @@ use std::{str::FromStr, time::Duration};
 use fltk::{enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
-use crate::context::ContextSettings;
+use crate::context::client::ContextSettings;
 
 use super::{orbit, widget, DeimosStateHandle};
 
@@ -46,7 +46,7 @@ pub fn settings(state: DeimosStateHandle) -> Group {
         let mut connect_timeout = connect_timeout.clone();
         tokio::task::spawn(
             async move {
-                let mut sub = state.ctx.persistent.settings.subscribe();
+                let mut sub = state.ctx.clients.persistent.settings.subscribe();
                 loop {
                     let Ok(_) = sub.changed().await else {
                         break
@@ -97,7 +97,7 @@ pub fn settings(state: DeimosStateHandle) -> Group {
             return
         };
         
-        let settings =  ContextSettings {
+        let settings = ContextSettings {
             server_uri,
             request_timeout,
             connect_timeout,
@@ -109,7 +109,7 @@ pub fn settings(state: DeimosStateHandle) -> Group {
         tokio::task::spawn(
             async move {
                 state.set_view(state.overview.clone()).await;
-                state.ctx.reload(settings).await;
+                state.ctx.clients.reload(settings).await;
             }
         );
     });

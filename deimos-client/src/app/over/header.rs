@@ -1,6 +1,6 @@
 use fltk::{enums::{Align, Font}, frame::Frame, group::Flex, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
-use crate::{app::{orbit, widget, DeimosStateHandle}, context::ContextConnectionState};
+use crate::{app::{orbit, widget, DeimosStateHandle}, context::client::ContextConnectionState};
 
 
 pub fn header(state: DeimosStateHandle) -> impl GroupExt {
@@ -33,7 +33,7 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
         let state = state.clone();
         tokio::task::spawn(
             async move {
-                let mut sub = state.ctx.conn.subscribe();
+                let mut sub = state.ctx.clients.conn.subscribe();
                 loop {
                     {
                         let state = sub.borrow_and_update();
@@ -88,7 +88,7 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
         let mut authentication_button = authentication_button.clone();
         tokio::task::spawn(
             async move {
-                let mut sub = state.ctx.persistent.token.subscribe();
+                let mut sub = state.ctx.clients.persistent.token.subscribe();
                 loop {
                     authentication_button.set_image(
                         Some(
