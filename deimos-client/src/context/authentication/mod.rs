@@ -1,2 +1,2 @@
-//#[cfg(windows)]
+#[cfg(windows)]
 pub mod dpapi;

@@ -7,7 +7,6 @@ use windows::Win32::{
 };
 
 
-//#[cfg(windows)]
 pub fn protect(buf: &[u8]) -> Result<Vec<u8>, DpapiError> {
     let blob = CRYPT_INTEGER_BLOB {
         cbData: buf.len() as u32,

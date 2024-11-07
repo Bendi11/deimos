@@ -1,12 +1,12 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{borrow::BorrowMut, path::PathBuf, sync::Arc, time::Duration};
 
 use deimosproto::DeimosServiceClient;
 use futures::StreamExt;
 use http::Uri;
 use im::HashMap;
 use pod::{CachedPod, CachedPodData, CachedPodState};
-use tokio::sync::Mutex;
-use tonic::{service::Interceptor, transport::{Channel, ClientTlsConfig}};
+use tokio::sync::{Mutex, Notify};
+use tonic::{metadata::MetadataValue, service::Interceptor, transport::{Channel, ClientTlsConfig}};
 use zeroize::Zeroizing;
 
 mod authentication;
@@ -33,7 +33,58 @@ pub struct Context {
     /// State of API connection, determined from gRPC status codes when operations fail
     pub conn: NotifyMutation<ContextConnectionState>,
     /// Client for the gRPC API
-    api: Mutex<Option<ApiClient>>,
+    api: CancellableMutex,
+}
+
+/// Mutex requiring locker tasks to be cancellable, for cancelling API operations without waiting
+/// on timeout
+#[derive(Debug)]
+pub struct CancellableMutex {
+    pub cancel: Arc<Notify>,
+    pub lock: Mutex<Option<CancellableMutexGuard>>,
+}
+
+
+#[derive(Debug)]
+pub struct CancellableMutexGuard {
+    cancel: Arc<Notify>,
+    client: ApiClient,
+}
+
+impl CancellableMutex {
+     fn new(client: Option<ApiClient>) -> Self {
+        let cancel = Arc::new(Notify::new());
+
+        Self {
+            lock: Mutex::new(
+                client.map(|guard|
+                    CancellableMutexGuard {
+                        cancel: cancel.clone(),
+                        client: guard,
+                    }
+                )
+            ),
+            cancel,
+        }
+    }
+
+    /// Lock the mutex and accquire a notifier that must cancel any long-running tasks that use the
+    /// given mutex lock
+    pub async fn lock(&self) -> Option<tokio::sync::MappedMutexGuard<CancellableMutexGuard>> {
+        tokio::sync::MutexGuard::try_map(
+            self
+                .lock
+                .lock()
+                .await,
+            |guard| guard.as_mut()
+        ).ok()
+    }
+    
+    /// Force any currently waiting tasks to exit and return the mutex guard when they have exited
+    pub async fn force_lock(&self) -> tokio::sync::MutexGuard<Option<CancellableMutexGuard>> {
+        self.cancel.notify_waiters();
+        self.lock.lock().await
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +94,13 @@ pub enum ContextConnectionState {
     Error,
 }
 
+/// Persistent state kept for the [Context]'s connection
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ContextPersistent {
+    pub settings: NotifyMutation<ContextSettings>,
+    pub token: NotifyMutation<Option<PersistentToken>>,
+}
+
 /// Settings that may be adjusted by the user
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextSettings {
@@ -50,7 +108,6 @@ pub struct ContextSettings {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
-    pub token: PersistentToken,
 }
 
 /// A token stored in the context save file - this may be encrypted with platform-specific APIs
@@ -65,14 +122,34 @@ pub struct PersistentToken {
 #[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
 pub enum PersistentTokenKind {
     Plaintext,
+    #[cfg(windows)]
     Dpapi,
 }
 
 impl PersistentToken {
-    pub fn unprotect(&self) -> Result<Vec<u8>, String>  {
+    pub fn protect(kind: PersistentTokenKind, data: Vec<u8>) -> Result<Self, String> {
+        match kind {
+            PersistentTokenKind::Plaintext => Ok(
+                Self {
+                    kind,
+                    data,
+                }
+            ),
+            #[cfg(windows)]
+            PersistentTokenKind::Dpapi => Ok(
+                Self {
+                    kind,
+                    data: authentication::dpapi::unprotect(&data).map_err(|e| e.to_string()),      
+                }
+            ),
+        }
+    }
+
+    pub fn unprotect(&self) -> Result<Zeroizing<Vec<u8>>, String>  {
         match self.kind {
-            PersistentTokenKind::Plaintext => Ok(self.data.clone()),
-            PersistentTokenKind::Dpapi => authentication::dpapi::protect(&self.data).map_err(|e| e.to_string()),
+            PersistentTokenKind::Plaintext => Ok(self.data.clone().into()),
+            #[cfg(windows)]
+            PersistentTokenKind::Dpapi => authentication::dpapi::protect(&self.data).map(Into::into).map_err(|e| e.to_string()),
         }
     }
 }
@@ -82,12 +159,6 @@ impl Drop for PersistentToken {
         use zeroize::Zeroize;
         self.data.zeroize();
     }
-}
-
-/// Persistent state kept for the [Context]'s connection
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ContextPersistent {
-    pub settings: NotifyMutation<ContextSettings>,
 }
 
 impl Context {
@@ -114,10 +185,16 @@ impl Context {
 
     async fn wrapper<'a, T, F: futures::Future<Output = Result<T, tonic::Status>> + 'a>(
         &self,
-        api: &'a mut ApiClient,
+        api: &'a mut CancellableMutexGuard,
         req: impl FnOnce(&'a mut ApiClient) -> F
     ) -> Result<T, tonic::Status> {
-        self.result_wrapper(req(api).await).await
+        let cancelled = api.cancel.notified();
+        let request = req(api.client.borrow_mut());
+        
+        tokio::select! {
+            result = request => self.result_wrapper(result).await,
+            _ = cancelled => Err(tonic::Status::cancelled("Cancelled by caller")),
+        }
     }
     
     /// Wait for pod status notifications and update the local cache with their statuses as
@@ -125,7 +202,8 @@ impl Context {
     pub async fn pod_event_loop(&self) -> ! {
         loop {
             let stream = {
-                let Some(ref mut api) = *self.api.lock().await else {
+                let mut api = self.api.lock().await;
+                let Some(ref mut api) = api else {
                     let timeout = {
                         let r = self.persistent.settings.read();
                         r.connect_timeout
@@ -133,6 +211,7 @@ impl Context {
                     tokio::time::sleep(timeout).await;
                     continue
                 };
+
                 self.wrapper(api, |api| api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {})).await
             };
 
@@ -183,7 +262,7 @@ impl Context {
     
     /// Attempt to update the status of the given pod
     pub async fn update(&self, pod: &CachedPod, up: CachedPodState) {
-        let Some(ref mut api) = *self.api.lock().await else { return };
+        let Some(ref mut api) = self.api.lock().await else { return };
         
         let request = deimosproto::UpdatePodRequest {
             id: pod.data.id.clone(),
@@ -202,7 +281,7 @@ impl Context {
     
     /// Query the server for a list of containers and update our local cache in response
     pub async fn synchronize(&self) {
-        let Some(ref mut api) = *self.api.lock().await else { return };
+        let Some(ref mut api) = self.api.lock().await else { return };
         let brief = match self.wrapper(api, |api| api.query_pods(deimosproto::QueryPodsRequest {})).await {
             Ok(r) => r.into_inner(),
             Err(e) => {
@@ -257,16 +336,20 @@ impl Context {
         };
         
         let pods = NotifyMutation::new(HashMap::default());
-        let api = Mutex::new(Self::connect_api(state.settings.read().clone()).await);
+        let api = CancellableMutex::new(None);
         let conn = NotifyMutation::new(ContextConnectionState::Unknown);
 
-        Self {
+        let this = Self {
             persistent: state,
             api,
             conn,
             pods,
             cache_dir,
-        }
+        };
+
+        this.connect_api().await;
+
+        this
     }
 
     pub async fn init(&self) {
@@ -276,30 +359,62 @@ impl Context {
     
     /// Reload the API connection using the given context settings
     pub async fn reload(&self, settings: ContextSettings) {
-        let (_, mut api) = tokio::join!(self.persistent.settings.set(settings.clone()), self.api.lock());
-        *api = Self::connect_api(settings).await;
+        self.persistent.settings.set(settings.clone()).await;
+        self.connect_api().await;
     }
 
 
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
-    async fn connect_api(settings: ContextSettings) -> Option<ApiClient> {
-        let channel = Channel::builder(settings.server_uri.clone())
-            .tls_config(ClientTlsConfig::new().with_webpki_roots())
-            .ok()?
-            .connect_timeout(settings.connect_timeout)
-            .timeout(settings.request_timeout)
-            .connect_lazy();
+    async fn connect_api(&self) {
+        let token = match *self.persistent.token.read() {
+            Some(ref token) => match token.unprotect() {
+                Ok(unprotect) => unprotect,
+                Err(e) => {
+                    tracing::error!("Failed to unprotect token: {}", e);
+                    return
+                }
+            },
+            None => {
+                tracing::trace!("Cannot connect to API, no token");
+                return
+            }
+        };
+        
+        let channel = {
+            let settings = self.persistent.settings.read();
+            Channel::builder(settings.server_uri.clone())
+                .connect_timeout(settings.connect_timeout)
+                .timeout(settings.request_timeout)
+                .tls_config(ClientTlsConfig::new().with_webpki_roots())
+                .ok()
+        };
 
-        Some(
-            DeimosServiceClient::with_interceptor(channel, AuthenticationInterceptor())
+        let Some(channel) = channel else { return };
+
+        
+        let channel = channel.connect_lazy();
+        
+        let mut lock = self.api.force_lock().await;
+        *lock = Some(
+            CancellableMutexGuard {
+                cancel: self.api.cancel.clone(),
+                client: DeimosServiceClient::with_interceptor(channel, AuthenticationInterceptor(token))
+            }
         )
     }
 }
 
 impl Interceptor for AuthenticationInterceptor {
-    fn call(&mut self, request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
-    
+    fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+        request
+            .metadata_mut()
+            .insert_bin(
+                "authorization-bin",
+                MetadataValue::from_bytes(&self.0)
+            );
+
+        Ok(request)
     }
 }
 
@@ -307,6 +422,7 @@ impl Default for ContextPersistent {
     fn default() -> Self {
         Self {
             settings: NotifyMutation::new(ContextSettings::default()),
+            token: NotifyMutation::new(None),
         }
     }
 }
@@ -317,7 +433,6 @@ impl Default for ContextSettings {
             server_uri: Uri::default(),
             request_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(60),
-            token_path: PathBuf::from("."),
         }
     }
 }

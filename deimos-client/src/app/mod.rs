@@ -2,8 +2,6 @@ use std::{ops::Deref, process::ExitCode, sync::Arc};
 
 use fltk::{app::App, group::Group, prelude::{GroupExt, WidgetExt}, window::Window};
 use once_cell::sync::OnceCell;
-use over::Overview;
-use settings::Settings;
 use tokio::sync::Mutex;
 
 use crate::context::Context;
@@ -18,8 +16,8 @@ mod settings;
 pub struct DeimosState {
     ctx: Context,
     active: Mutex<Group>,
-    settings: Settings,
-    overview: Overview,
+    settings: Group,
+    overview: Group,
 }
 
 #[derive(Clone, Default)]
@@ -62,20 +60,20 @@ pub async fn run() -> ExitCode {
 
     let state = DeimosStateHandle::default();
     
-    let overview = Overview::new(state.clone());
-    window.resizable(&overview.group());
-    let settings = Settings::new(state.clone());
-    window.resizable(&settings.group());
+    let mut overview = over::overview(state.clone());
+    window.resizable(&overview);
+    let settings = settings::settings(state.clone());
+    window.resizable(&settings);
 
     window.end();
     window.show();
     
-    overview.group().show();
+    overview.show();
 
     let _ = state.0.set(
         DeimosState {
             ctx,
-            active: Mutex::new(overview.group()),
+            active: Mutex::new(overview.clone()),
             settings,
             overview,
         }
