@@ -1,4 +1,6 @@
-use futures::future::BoxFuture;
+use std::{future::Future, task::Poll};
+
+use pin_project::pin_project;
 use tonic::Code;
 use tower::{Layer, Service};
 
@@ -13,6 +15,13 @@ pub struct ConnectionTracker<S> {
 }
 
 pub struct ConnectionTrackerLayer {
+    conn: NotifyMutation<ContextConnectionState>,
+}
+
+#[pin_project]
+pub struct ConnectionTrackerFuture<F> {
+    #[pin]
+    inner: F,
     conn: NotifyMutation<ContextConnectionState>,
 }
 
@@ -46,28 +55,34 @@ where
 {
     type Response = http::Response<B>;
     type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = ConnectionTrackerFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
         tower::Service::poll_ready(&mut self.inner, cx)
     }
 
     fn call(&mut self, request: http::Request<B>) -> Self::Future {
-        let clone = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, clone);
-        let conn = self.conn.clone();
+        let inner = self.inner.call(request);
 
-        Box::pin(
-            async move {
-                let response = match tower::Service::call(&mut inner, request).await {
-                    Ok(response) => response,
-                    Err(e) => {
-                        tracing::warn!("Got error in tonic channel when sending request: {}", e);
-                        conn.set(ContextConnectionState::Error).await;
-                        return Err(e)
-                    }
-                };
+        ConnectionTrackerFuture {
+            inner,
+            conn: self.conn.clone(),
+        }
+    }
+}
 
+impl<F, T, E> Future for ConnectionTrackerFuture<F>
+where 
+    F: Future<Output = Result<http::Response<T>, E>>,
+    E: std::fmt::Display {
+
+    type Output = F::Output;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        let project = self.project();
+        let response = futures::ready!(project.inner.poll(cx));
+        match response {
+            Ok(response) => {
                 if let Some(status) = tonic::Status::from_header_map(response.headers()) {
                     let connstat = match status.code() {
                         Code::Ok => ContextConnectionState::Connected,
@@ -75,11 +90,15 @@ where
                         _ => ContextConnectionState::Error,
                     };
 
-                    conn.set(connstat).await;
+                    project.conn.set(connstat);
                 }
 
-                Ok(response)
+                Poll::Ready(Ok(response))
+            },
+            Err(e) => {
+                project.conn.set(ContextConnectionState::Error);
+                Poll::Ready(Err(e))
             }
-        )
+        }
     }
 }

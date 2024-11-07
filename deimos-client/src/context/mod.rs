@@ -181,7 +181,7 @@ impl Context {
                 match pod_state {
                     Some(up) => {
                         tracing::trace!("Got pod status notification for {} - {:?}", event.id, event.state());
-                        up.set(CachedPodState::from(event.state())).await;
+                        up.set(CachedPodState::from(event.state()));
                     },
                     None => {
                         tracing::warn!("Got pod status notification for unknown container {}", event.id);
@@ -227,7 +227,7 @@ impl Context {
         for pod in brief.pods {
             match pods.get_mut(&pod.id) {
                 Some(exist) => {
-                    exist.data.up.set(CachedPodState::from(pod.state())).await;
+                    exist.data.up.set(CachedPodState::from(pod.state()));
                     //exist.data.name = pod.title;
                 },
                 None => {
@@ -247,7 +247,7 @@ impl Context {
             }
         }
 
-        self.pods.set(pods).await;
+        self.pods.set(pods);
     }
 
     /// Load all context state from the local cache directory and begin connection attempts to the
@@ -286,13 +286,13 @@ impl Context {
     }
 
     pub async fn init(&self) {
-        self.pods.set(Self::load_cached_pods(self.cache_dir.clone()).await).await;
-        self.persistent.settings.notify().await;
+        self.pods.set(Self::load_cached_pods(self.cache_dir.clone()).await);
+        self.persistent.settings.notify();
     }
     
     /// Reload the API connection using the given context settings
     pub async fn reload(&self, settings: ContextSettings) {
-        self.persistent.settings.set(settings.clone()).await;
+        self.persistent.settings.set(settings.clone());
         self.connect_api().await;
     }
 
@@ -393,12 +393,12 @@ impl<T> NotifyMutation<T> {
     }
     
     /// Set the current value, notifying all waiting tasks of a mutation
-    pub async fn set(&self, val: T) {
+    pub fn set(&self, val: T) {
         let _ = self.0.send_replace(val);
     }
     
     /// Notify waiting subscribers without modifying the contained value
-    pub async fn notify(&self) {
+    pub fn notify(&self) {
         self.0.send_modify(|_| ());
     }
 }
