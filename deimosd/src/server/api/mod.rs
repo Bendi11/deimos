@@ -4,9 +4,12 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use igd_next::PortMappingProtocol;
+use persist::ApiPersistent;
+use pin_project::pin_project;
 use tokio_util::sync::CancellationToken;
+use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Server, ServerTlsConfig};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::pod::docker::logs::PodLogStream;
 use crate::pod::id::DeimosId;
@@ -17,11 +20,17 @@ use super::Deimos;
 
 use deimosproto::{self as proto};
 
+mod auth;
+mod persist;
+
 /// State required exclusively for the gRPC server including UPnP port leases.
 pub struct ApiState {
+    /// Configuration parsed from the global config file
     pub config: ApiConfig,
+    /// Data persisted in a save file for the API
+    pub persistent: ApiPersistent,
     /// Address leased for the API
-    pub lease: Option<UpnpLease>,
+    pub _lease: Option<UpnpLease>,
 }
 
 /// Configuration used to initialize the Deimos gRPC API server.
@@ -31,11 +40,12 @@ pub struct ApiConfig {
     pub bind: SocketAddr,
     #[serde(default)]
     pub upnp: bool,
-    pub client_ca_root: PathBuf,
     pub certificate: PathBuf,
     pub privkey: PathBuf,
     #[serde(default = "ApiConfig::default_timeout")]
     pub timeout: Duration,
+    #[serde(default)]
+    pub persist_path: PathBuf,
 }
 
 impl ApiState {
@@ -57,7 +67,9 @@ impl ApiState {
             false => None,
         };
 
-        Ok(Self { config, lease })
+        let persistent = ApiPersistent::load(&config.persist_path);
+
+        Ok(Self { config, _lease: lease, persistent })
     }
     
     /// Apply settings given in the API configuration to create a new gRPC server
@@ -97,8 +109,14 @@ impl Deimos {
             }
         };
 
+
         let result = server
-            .add_service(proto::DeimosServiceServer::from_arc(self.clone()))
+            .add_service(
+                InterceptedService::new(
+                    proto::DeimosServiceServer::from_arc(self.clone()),
+                    self.api.persistent.tokens.clone(),
+                )
+            )
             .serve_with_shutdown(self.api.config.bind, cancel.cancelled());
 
         tokio::select! {
@@ -160,7 +178,7 @@ impl proto::DeimosService for Deimos {
             Ok(proto::PodState::Disabled) => tokio::task::spawn(async move {
                 if let Err(e) = self.pods.disable(pod).await {
                     tracing::error!(
-                        "Failed ot disable pod {} in response to API request: {}",
+                        "Failed to disable pod {} in response to API request: {}",
                         id,
                         e
                     );
@@ -254,6 +272,26 @@ impl proto::DeimosService for Deimos {
 
 type PodStatusApiMapper = dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status> + Send + Sync;
 type PodLogApiMapper = dyn FnMut(Bytes) -> Result<proto::PodLogChunk, tonic::Status> + Send + Sync;
+
+#[pin_project]
+pub struct RequestTokenFuture(#[pin] tokio::sync::oneshot::Receiver<proto::Token>);
+
+impl futures::Future for RequestTokenFuture {
+    type Output = Result<proto::Token, tonic::Status>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        let recv = self.project();
+        match recv.0.poll(cx) {
+            std::task::Poll::Ready(val) => std::task::Poll::Ready(
+                match val {
+                    Ok(val) => Ok(val),
+                    Err(_) => Err(tonic::Status::internal("oneshot receiver"))
+                }
+            ),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiInitError {

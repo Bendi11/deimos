@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use bollard::{secret::{EventActor, EventMessageTypeEnum}, system::EventsOptions, Docker};
+use bollard::{secret::EventMessageTypeEnum, system::EventsOptions, Docker};
 use dashmap::DashMap;
 use futures::{
     stream::SelectAll,

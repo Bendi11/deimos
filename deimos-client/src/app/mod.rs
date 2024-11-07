@@ -9,7 +9,8 @@ use crate::context::Context;
 
 pub mod orbit;
 pub mod widget;
-pub mod over;
+mod over;
+mod auth;
 mod settings;
 
 

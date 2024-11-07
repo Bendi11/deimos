@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package deimos;
+
+message Token {
+    string name = 1;
+    bytes token = 2;
+}
+
+message TokenRequest {
+    string user = 1;
+    int64 datetime = 2;
+}
+
+service DeimosAuthorization {
+    // Request a new authentication token, to be manually approved by an administrator
+    rpc RequestToken(TokenRequest) returns(stream Token);
+}

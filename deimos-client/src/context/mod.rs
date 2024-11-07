@@ -1,7 +1,8 @@
-use std::{borrow::BorrowMut, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use deimosproto::DeimosServiceClient;
 use futures::StreamExt;
+use layer::{cancel::{CancelLayer, CancelService}, conn::{ConnectionTracker, ConnectionTrackerLayer}};
+use deimosproto::DeimosServiceClient;
 use http::Uri;
 use im::HashMap;
 use pod::{CachedPod, CachedPodData, CachedPodState};
@@ -9,16 +10,23 @@ use tokio::sync::{Mutex, Notify};
 use tonic::{metadata::MetadataValue, service::Interceptor, transport::{Channel, ClientTlsConfig}};
 use zeroize::Zeroizing;
 
-mod authentication;
+mod auth;
 mod load;
+mod layer;
 pub mod pod;
 
 #[derive(Debug, Clone)]
 pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
 
-struct AuthenticationInterceptor(Zeroizing<Vec<u8>>);
+#[derive(Clone)]
+struct AuthenticationInterceptor(Option<Zeroizing<Vec<u8>>>);
 
-type ApiClient = DeimosServiceClient<tonic::service::interceptor::InterceptedService<Channel, AuthenticationInterceptor>>;
+type ApiClient = DeimosServiceClient<
+    tonic::service::interceptor::InterceptedService<
+        CancelService<ConnectionTracker<Channel>>,
+        AuthenticationInterceptor
+    >
+>;
 
 /// Context shared across the application used to perform API requests and maintain a local
 /// container cache.
@@ -33,58 +41,9 @@ pub struct Context {
     /// State of API connection, determined from gRPC status codes when operations fail
     pub conn: NotifyMutation<ContextConnectionState>,
     /// Client for the gRPC API
-    api: CancellableMutex,
-}
-
-/// Mutex requiring locker tasks to be cancellable, for cancelling API operations without waiting
-/// on timeout
-#[derive(Debug)]
-pub struct CancellableMutex {
-    pub cancel: Arc<Notify>,
-    pub lock: Mutex<Option<CancellableMutexGuard>>,
-}
-
-
-#[derive(Debug)]
-pub struct CancellableMutexGuard {
+    api: Mutex<Option<ApiClient>>,
+    /// Notifier that will cancel any pending API requests
     cancel: Arc<Notify>,
-    client: ApiClient,
-}
-
-impl CancellableMutex {
-     fn new(client: Option<ApiClient>) -> Self {
-        let cancel = Arc::new(Notify::new());
-
-        Self {
-            lock: Mutex::new(
-                client.map(|guard|
-                    CancellableMutexGuard {
-                        cancel: cancel.clone(),
-                        client: guard,
-                    }
-                )
-            ),
-            cancel,
-        }
-    }
-
-    /// Lock the mutex and accquire a notifier that must cancel any long-running tasks that use the
-    /// given mutex lock
-    pub async fn lock(&self) -> Option<tokio::sync::MappedMutexGuard<CancellableMutexGuard>> {
-        tokio::sync::MutexGuard::try_map(
-            self
-                .lock
-                .lock()
-                .await,
-            |guard| guard.as_mut()
-        ).ok()
-    }
-    
-    /// Force any currently waiting tasks to exit and return the mutex guard when they have exited
-    pub async fn force_lock(&self) -> tokio::sync::MutexGuard<Option<CancellableMutexGuard>> {
-        self.cancel.notify_waiters();
-        self.lock.lock().await
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +99,7 @@ impl PersistentToken {
             PersistentTokenKind::Dpapi => Ok(
                 Self {
                     kind,
-                    data: authentication::dpapi::unprotect(&data).map_err(|e| e.to_string()),      
+                    data: auth::dpapi::unprotect(&data).map_err(|e| e.to_string()),      
                 }
             ),
         }
@@ -150,7 +109,7 @@ impl PersistentToken {
         match self.kind {
             PersistentTokenKind::Plaintext => Ok(self.data.clone().into()),
             #[cfg(windows)]
-            PersistentTokenKind::Dpapi => authentication::dpapi::protect(&self.data).map(Into::into).map_err(|e| e.to_string()),
+            PersistentTokenKind::Dpapi => auth::dpapi::protect(&self.data).map(Into::into).map_err(|e| e.to_string()),
         }
     }
 }
@@ -170,33 +129,6 @@ impl Context {
         self.save_state();
         self.save_cached_pods();
     }
-
-    async fn result_wrapper<T>(&self, res: Result<T, tonic::Status>) -> Result<T, tonic::Status> {
-        match res {
-            Ok(val) => {
-                self.conn.set(ContextConnectionState::Connected).await;
-                Ok(val)
-            },
-            Err(e) => {
-                self.conn.set(ContextConnectionState::Error).await;
-                Err(e)
-            }
-        }
-    }
-
-    async fn wrapper<'a, T, F: futures::Future<Output = Result<T, tonic::Status>> + 'a>(
-        &self,
-        api: &'a mut CancellableMutexGuard,
-        req: impl FnOnce(&'a mut ApiClient) -> F
-    ) -> Result<T, tonic::Status> {
-        let cancelled = api.cancel.notified();
-        let request = req(api.client.borrow_mut());
-        
-        tokio::select! {
-            result = request => self.result_wrapper(result).await,
-            _ = cancelled => Err(tonic::Status::cancelled("Cancelled by caller")),
-        }
-    }
     
     /// Wait for pod status notifications and update the local cache with their statuses as
     /// required
@@ -204,7 +136,7 @@ impl Context {
         loop {
             let stream = {
                 let mut api = self.api.lock().await;
-                let Some(ref mut api) = api else {
+                let Some(ref mut api) = *api else {
                     let timeout = {
                         let r = self.persistent.settings.read();
                         r.connect_timeout
@@ -213,7 +145,7 @@ impl Context {
                     continue
                 };
 
-                self.wrapper(api, |api| api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {})).await
+                api.subscribe_pod_status(deimosproto::PodStatusStreamRequest {}).await
             };
 
             let mut stream = match stream {
@@ -233,8 +165,6 @@ impl Context {
             };
             
             while let Some(event) = stream.next().await {
-                let event = self.result_wrapper(event).await;
-
                 let event = match event {
                     Ok(ev) => ev,
                     Err(e) => {
@@ -263,30 +193,30 @@ impl Context {
     
     /// Attempt to update the status of the given pod
     pub async fn update(&self, pod: &CachedPod, up: CachedPodState) {
-        let Some(ref mut api) = self.api.lock().await else { return };
+        let Some(ref mut api) = *self.api.lock().await else { return };
         
         let request = deimosproto::UpdatePodRequest {
             id: pod.data.id.clone(),
             method: deimosproto::PodState::from(up) as i32,
         };
 
-        match self.wrapper(api, |api| api.update_pod(request)).await {
+        match api.update_pod(request).await {
             Ok(_) => {
                 tracing::trace!("Successfully updated pod {} state to {:?}", pod.data.id, up);
             },
             Err(e) => {
-                tracing::error!("Failed to update pod {} state: {}", pod.data.id, e);
+                tracing::warn!("Failed to update pod {} state: {}", pod.data.id, e);
             }
         }
     }
     
     /// Query the server for a list of containers and update our local cache in response
     pub async fn synchronize(&self) {
-        let Some(ref mut api) = self.api.lock().await else { return };
-        let brief = match self.wrapper(api, |api| api.query_pods(deimosproto::QueryPodsRequest {})).await {
+        let Some(ref mut api) = *self.api.lock().await else { return };
+        let brief = match api.query_pods(deimosproto::QueryPodsRequest {}).await {
             Ok(r) => r.into_inner(),
             Err(e) => {
-                tracing::error!("Failed to query pods from server: {}", e);
+                tracing::warn!("Failed to query pods from server: {}", e);
                 return
             }
         };
@@ -328,7 +258,7 @@ impl Context {
             None => PathBuf::from("./deimos-cache"),
         };
 
-        let state = match Self::load_state(&cache_dir) {
+        let persistent = match Self::load_state(&cache_dir) {
             Ok(state) => state,
             Err(e) => {
                 tracing::error!("Failed to load application state: {e}");
@@ -337,15 +267,17 @@ impl Context {
         };
         
         let pods = NotifyMutation::new(HashMap::default());
-        let api = CancellableMutex::new(None);
+        let api = Mutex::new(None);
         let conn = NotifyMutation::new(ContextConnectionState::Unknown);
+        let cancel = Arc::new(Notify::new());
 
         let this = Self {
-            persistent: state,
+            persistent,
             api,
             conn,
             pods,
             cache_dir,
+            cancel,
         };
 
         this.connect_api().await;
@@ -371,17 +303,13 @@ impl Context {
         let token = self.persistent.token.read().clone();
         let token = match token {
             Some(ref token) => match token.unprotect() {
-                Ok(unprotect) => unprotect,
+                Ok(unprotect) => Some(unprotect),
                 Err(e) => {
                     tracing::error!("Failed to unprotect token: {}", e);
                     return
                 }
             },
-            None => {
-                self.conn.set(ContextConnectionState::NoToken).await;
-                tracing::trace!("Cannot connect to API, no token");
-                return
-            }
+            None => None,
         };
         
         let channel = {
@@ -395,27 +323,33 @@ impl Context {
 
         let Some(channel) = channel else { return };
 
+        self.cancel.notify_waiters();
+        let mut lock = self.api.lock().await;
+
         
         let channel = channel.connect_lazy();
+        let client = DeimosServiceClient::with_interceptor(
+            tower::ServiceBuilder::new()
+                .layer(CancelLayer::new(self.cancel.clone()))
+                .layer(ConnectionTrackerLayer::new(self.conn.clone()))
+                .service(channel),
+            AuthenticationInterceptor(token)
+        );
         
-        let mut lock = self.api.force_lock().await;
-        *lock = Some(
-            CancellableMutexGuard {
-                cancel: self.api.cancel.clone(),
-                client: DeimosServiceClient::with_interceptor(channel, AuthenticationInterceptor(token))
-            }
-        )
+        *lock = Some(client);
     }
 }
 
 impl Interceptor for AuthenticationInterceptor {
     fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
-        request
-            .metadata_mut()
-            .insert_bin(
-                "authorization-bin",
-                MetadataValue::from_bytes(&self.0)
-            );
+        if let Some(ref token) = self.0 {
+            request
+                .metadata_mut()
+                .insert_bin(
+                    "authorization-bin",
+                    MetadataValue::from_bytes(token)
+                );
+        }
 
         Ok(request)
     }

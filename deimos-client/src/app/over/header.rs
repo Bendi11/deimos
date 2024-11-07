@@ -53,7 +53,7 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
                                 connection_status.set_label_color(orbit::MARS[1]);
                             },
                             ContextConnectionState::NoToken => {
-                                connection_status.set_label("No Authentication Token");
+                                connection_status.set_label("No Authorization Token");
                                 connection_status.set_label_color(orbit::VENUS[1]);
                             }
                         }

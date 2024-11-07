@@ -6,6 +6,7 @@ import public "pod.proto";
 import public "status.proto";
 import public "query.proto";
 import public "update.proto";
+import public "auth.proto";
 
 
 service DeimosService {
