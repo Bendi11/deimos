@@ -90,6 +90,7 @@ impl CancellableMutex {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextConnectionState {
     Unknown,
+    NoToken,
     Connected,
     Error,
 }
@@ -367,7 +368,8 @@ impl Context {
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
     async fn connect_api(&self) {
-        let token = match *self.persistent.token.read() {
+        let token = self.persistent.token.read().clone();
+        let token = match token {
             Some(ref token) => match token.unprotect() {
                 Ok(unprotect) => unprotect,
                 Err(e) => {
@@ -376,6 +378,7 @@ impl Context {
                 }
             },
             None => {
+                self.conn.set(ContextConnectionState::NoToken).await;
                 tracing::trace!("Cannot connect to API, no token");
                 return
             }
