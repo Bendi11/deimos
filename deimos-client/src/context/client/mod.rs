@@ -1,12 +1,12 @@
-use std::{sync::Arc, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use auth::PersistentToken;
-use deimosproto::client::DeimosServiceClient;
+use chrono::DateTime;
+use deimosproto::{auth::DeimosTokenKey, client::DeimosServiceClient};
 use http::Uri;
 use layer::{cancel::{CancelLayer, CancelService}, conn::{ConnectionTracker, ConnectionTrackerLayer}};
 use tokio::sync::{Mutex, Notify};
 use tonic::{metadata::MetadataValue, service::Interceptor, transport::{Channel, ClientTlsConfig}};
-use zeroize::Zeroizing;
 
 use super::NotifyMutation;
 
@@ -14,7 +14,7 @@ mod layer;
 mod auth;
 
 #[derive(Clone)]
-pub struct AuthenticationInterceptor(Option<Zeroizing<Vec<u8>>>);
+pub struct AuthenticationInterceptor(Option<DeimosTokenKey>);
 
 /// A client for the authorized pod control API
 pub type ApiClient = DeimosServiceClient<
@@ -139,7 +139,7 @@ impl ContextClients {
                 .layer(CancelLayer::new(self.cancel.clone()))
                 .layer(ConnectionTrackerLayer::new(self.conn.clone()))
                 .service(channel.clone()),
-            AuthenticationInterceptor(token)
+            AuthenticationInterceptor(token.map(|tok| tok.key))
         );
 
         let auth = AuthClient::new(
@@ -160,12 +160,20 @@ impl ContextClients {
 impl Interceptor for AuthenticationInterceptor {
     fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
         if let Some(ref token) = self.0 {
-            request
-                .metadata_mut()
-                .insert_bin(
-                    "authorization-bin",
-                    MetadataValue::from_bytes(token)
-                );
+            match MetadataValue::from_str(&token.to_base64()) {
+                Ok(val) => {
+                    request
+                        .metadata_mut()
+                        .insert(
+                            "authorization",
+                            val,
+                        );
+                },
+                Err(e) => {
+                    tracing::error!("Failed to create HTTP header for authorization token: {}", e);
+                }
+            }
+            
         }
 
         Ok(request)

@@ -79,9 +79,15 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
     let authentication_red  = widget::svg::svg_color(authentication_icon, 128, orbit::MARS[2]);
     let mut authentication_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
     authentication_button.resize_callback(widget::svg::resize_image_cb(0, 0));
-    authentication_button.set_callback(move |_| {
-        
-    });
+    {
+        let state = state.clone();
+        authentication_button.set_callback(move |_| {
+            let state = state.clone();
+            tokio::task::spawn(async move {
+                state.set_view(state.authorization.clone()).await;
+            });
+        });
+    }
 
     {
         let state = state.clone();

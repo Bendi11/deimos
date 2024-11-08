@@ -19,6 +19,7 @@ pub struct DeimosState {
     active: Mutex<Group>,
     settings: Group,
     overview: Group,
+    authorization: Group,
 }
 
 #[derive(Clone, Default)]
@@ -66,6 +67,9 @@ pub async fn run() -> ExitCode {
     let settings = settings::settings(state.clone());
     window.resizable(&settings);
 
+    let authorization = auth::authorization(state.clone());
+    window.resizable(&authorization);
+
     window.end();
     window.show();
     
@@ -77,6 +81,7 @@ pub async fn run() -> ExitCode {
             active: Mutex::new(overview.clone()),
             settings,
             overview,
+            authorization,
         }
     );
 

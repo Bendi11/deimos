@@ -1,4 +1,8 @@
-use zeroize::Zeroizing;
+use std::sync::Arc;
+
+use chrono::{DateTime, Utc};
+use deimosproto::auth::DeimosTokenKey;
+use zeroize::{Zeroize, Zeroizing};
 
 #[cfg(windows)]
 mod dpapi;
@@ -7,9 +11,17 @@ mod dpapi;
 /// and may need to be decrypted before use with an [AuthenticationInterceptor]
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct PersistentToken {
-    kind: PersistentTokenKind,
-    #[serde(with = "serde_bytes")]
-    data: Vec<u8>,
+    pub kind: PersistentTokenKind,
+    pub data: DeimosToken,
+}
+
+
+/// An unprotected token as it is sent in the API
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct DeimosToken {
+    pub user: Arc<str>,
+    pub issued: DateTime<Utc>,
+    pub key: DeimosTokenKey,
 }
 
 
@@ -21,8 +33,18 @@ pub enum PersistentTokenKind {
 }
 
 impl PersistentToken {
-    /// Encrypt the given persistent key using platform specific APIs and return it
-    pub fn protect(kind: PersistentTokenKind, data: Vec<u8>) -> Result<Self, String> {
+    /// Get the username that this token was issued to
+    pub fn user(&self) -> &str {
+        &self.data.user
+    }
+
+    /// Get the datetime that this token was issued at
+    pub fn issued_at(&self) -> DateTime<Utc> {
+        self.data.issued
+    }
+
+    /// Encrypt the given token's key using platform specific APIs and return it
+    pub fn protect(kind: PersistentTokenKind, data: DeimosToken) -> Result<Self, String> {
         match kind {
             PersistentTokenKind::Plaintext => Ok(
                 Self {
@@ -41,18 +63,11 @@ impl PersistentToken {
     }
     
     /// Decrypt the contents of this token using platform-specific APIs specified in the [PersistentTokenKind]
-    pub fn unprotect(&self) -> Result<Zeroizing<Vec<u8>>, String>  {
+    pub fn unprotect(&self) -> Result<DeimosToken, String>  {
         match self.kind {
             PersistentTokenKind::Plaintext => Ok(self.data.clone().into()),
             #[cfg(windows)]
             PersistentTokenKind::Dpapi => auth::dpapi::protect(&self.data).map(Into::into).map_err(|e| e.to_string()),
         }
-    }
-}
-
-impl Drop for PersistentToken {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.data.zeroize();
     }
 }
