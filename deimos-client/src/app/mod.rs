@@ -66,7 +66,6 @@ pub async fn run() -> ExitCode {
     window.resizable(&overview);
     let settings = settings::settings(state.clone());
     window.resizable(&settings);
-
     let authorization = auth::authorization(state.clone());
     window.resizable(&authorization);
 

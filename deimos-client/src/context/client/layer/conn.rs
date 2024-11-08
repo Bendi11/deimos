@@ -6,15 +6,15 @@ use tower::{Layer, Service};
 
 use crate::context::{client::ContextConnectionState, NotifyMutation};
 
+/// A layer that will wrap a service with a [ConnectionTracker]
+pub struct ConnectionTrackerLayer {
+    conn: NotifyMutation<ContextConnectionState>,
+}
 
 /// A [Service] that tracks responses from each request and sets the given connection state
 #[derive(Debug, Clone,)]
 pub struct ConnectionTracker<S> {
     inner: S,
-    conn: NotifyMutation<ContextConnectionState>,
-}
-
-pub struct ConnectionTrackerLayer {
     conn: NotifyMutation<ContextConnectionState>,
 }
 

@@ -5,6 +5,7 @@ use pin_project::pin_project;
 use tokio::sync::Notify;
 use tower::{Layer, Service};
 
+/// Layer that will wrap a service in a [CancelService]
 pub struct CancelLayer {
     cancel: Arc<Notify>,
 }

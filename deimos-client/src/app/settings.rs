@@ -1,15 +1,16 @@
 use std::{str::FromStr, time::Duration};
 
-use fltk::{enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{group::{Flex, Group, Pack}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
 use crate::context::client::ContextSettings;
 
-use super::{orbit, widget, DeimosStateHandle};
+use super::{orbit, widget::{self, input::input_box}, DeimosStateHandle};
 
 
 pub fn settings(state: DeimosStateHandle) -> Group {
     let mut top = Group::default_fill();
+    top.set_color(orbit::NIGHT[2]);
     top.hide();
     
     let mut column = Flex::default()
@@ -35,9 +36,12 @@ pub fn settings(state: DeimosStateHandle) -> Group {
    
 
 
-    let mut host_url = input_box::<Input>(&mut column, "Host URL");
-    let mut request_timeout = input_box::<IntInput>(&mut column, "gRPC Request Timeout (seconds)");
-    let mut connect_timeout = input_box::<IntInput>(&mut column, "gRPC Connection Timeout (seconds)");
+    let (frame, mut host_url) = input_box::<Input>("Host URL");
+    column.fixed(&frame, 60);
+    let (frame, mut request_timeout) = input_box::<IntInput>("gRPC Request Timeout (seconds)");
+    column.fixed(&frame, 60);
+    let (frame, mut connect_timeout) = input_box::<IntInput>("gRPC Connection Timeout (seconds)");
+    column.fixed(&frame, 60);
 
     {
         let state = state.clone();
@@ -115,37 +119,4 @@ pub fn settings(state: DeimosStateHandle) -> Group {
     });
     
     top
-}
-
-fn input_lbl(column: &mut Flex, label: &str) -> Frame {
-    let mut host_lbl = Frame::default();
-    column.fixed(&host_lbl, 32);
-    host_lbl.set_align(Align::Inside | Align::Left);
-    host_lbl.set_label_color(orbit::SOL[0]);
-    host_lbl.set_label(label);
-    host_lbl.set_label_size(18);
-    host_lbl
-}
-
-fn input_box<I: InputExt + Default>(column: &mut Flex, label: &str) -> I {
-    input_lbl(column, label);
-
-    let mut input = I::default();
-    column.fixed(&input, 40);
-    input.set_frame(fltk::enums::FrameType::RShadowBox);
-    input.set_text_color(orbit::MERCURY[1]);
-    input.set_text_font(Font::Courier);
-    input.set_text_size(18);
-    input.set_cursor_color(orbit::SOL[0]);
-    input.set_color(orbit::NIGHT[1]);
-    input.set_label_color(orbit::SOL[0]);
-    input.set_trigger(CallbackTrigger::Changed);
-    input.set_callback(|i| {
-        if i.text_color() != orbit::MERCURY[1] {
-            i.set_text_color(orbit::MERCURY[1]);
-            i.redraw();
-        }
-    });
-
-    input
 }

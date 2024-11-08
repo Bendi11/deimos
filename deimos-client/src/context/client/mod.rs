@@ -1,7 +1,6 @@
 use std::{str::FromStr, sync::Arc, time::Duration};
 
 use auth::PersistentToken;
-use chrono::DateTime;
 use deimosproto::{auth::DeimosTokenKey, client::DeimosServiceClient};
 use http::Uri;
 use layer::{cancel::{CancelLayer, CancelService}, conn::{ConnectionTracker, ConnectionTrackerLayer}};
@@ -60,6 +59,7 @@ pub enum ContextConnectionState {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextPersistent {
     pub settings: NotifyMutation<ContextSettings>,
+    #[serde(default)]
     pub token: NotifyMutation<Option<PersistentToken>>,
 }
 

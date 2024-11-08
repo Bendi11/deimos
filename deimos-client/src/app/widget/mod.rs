@@ -4,6 +4,7 @@ use super::orbit;
 
 pub mod svg;
 pub mod button;
+pub mod input;
 
 pub fn orbit_scheme() {
     fltk::app::reload_scheme().ok();

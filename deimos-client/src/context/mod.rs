@@ -9,7 +9,7 @@ mod load;
 pub mod client;
 pub mod pod;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
 
 /// Context shared across the application used to perform API requests and maintain a local
