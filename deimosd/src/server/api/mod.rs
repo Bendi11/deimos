@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use igd_next::PortMappingProtocol;
-use persist::ApiPersistent;
+use persist::{ApiPersistError, ApiPersistent};
 use pin_project::pin_project;
 use tokio_util::sync::CancellationToken;
 use tonic::service::interceptor::InterceptedService;
@@ -71,6 +71,10 @@ impl ApiState {
 
         Ok(Self { config, _lease: lease, persistent })
     }
+
+    pub fn save(&self) -> Result<(), ApiPersistError> {
+        self.persistent.save(&self.config.persist_path)
+    }
     
     /// Apply settings given in the API configuration to create a new gRPC server
     async fn init_server(config: &ApiConfig) -> Result<Server, ApiInitError> {
@@ -117,6 +121,7 @@ impl Deimos {
                     self.api.persistent.tokens.clone(),
                 )
             )
+            .add_service(proto::authserver::DeimosAuthorizationServer::from_arc(self.clone()))
             .serve_with_shutdown(self.api.config.bind, cancel.cancelled());
 
         tokio::select! {

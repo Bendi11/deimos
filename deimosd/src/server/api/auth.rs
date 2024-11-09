@@ -11,6 +11,7 @@ use tonic::{async_trait, service::Interceptor};
 use crate::server::Deimos;
 
 
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize,)]
 pub struct ApiToken {
     /// Username as given in the token request
@@ -29,8 +30,7 @@ pub struct ApiAuthorization {
 
 impl ApiAuthorization {
     pub fn issue(&self, name: String) -> ApiToken {
-        let name: Arc<str> = Arc::from(name);
-        let token = ApiToken::rand(OsRng, name.clone());
+        let token = ApiToken::rand(OsRng, name);
         self.tokens.insert(token.key.to_base64(), token.clone());
         token
     }
@@ -52,38 +52,50 @@ impl Interceptor for ApiAuthorization {
     }
 }
 
-#[pin_project]
-pub struct AuthTokenStream {
-    #[pin]
-    recv: tokio::sync::oneshot::Receiver<ApiToken>,
+#[pin_project(project = AuthTokenStreamProj)]
+pub enum AuthTokenStream {
+    Waiting(#[pin] tokio::sync::oneshot::Receiver<ApiToken>),
+    Empty
 }
 
 #[async_trait]
 impl deimosproto::authserver::DeimosAuthorization for Deimos {
-    type RequestTokenStream = futures::stream::Once<tokio::sync::oneshot::Receiver<tonic::Response<>;
+    type RequestTokenStream = AuthTokenStream;
 
-    fn request_token(self: Arc<Self>, request: tonic::Request<deimosproto::TokenRequest>) -> Result<tonic::Response<Self::RequestTokenStream>, tonic::Status> {
-
+    async fn request_token(self: Arc<Self>, request: tonic::Request<deimosproto::TokenRequest>) -> Result<tonic::Response<Self::RequestTokenStream>, tonic::Status> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let stream = AuthTokenStream::Waiting(rx);
+        let token = self.api.persistent.tokens.issue(request.into_inner().user);
+        let _ = tx.send(token);
+        Ok(tonic::Response::new(stream))
     }
 }
 
 impl Stream for AuthTokenStream {
-    type Item = Result<tonic::Response<deimosproto::Token>, tonic::Status>;
+    type Item = Result<deimosproto::Token, tonic::Status>;
 
-    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
-        let project = self.project();
-        let tok = futures::ready!(project.recv.poll(cx));
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        Poll::Ready(match self.as_mut().project() {
+            AuthTokenStreamProj::Waiting(recv) => {
+                let recv = futures::ready!(recv.poll(cx));
+                *self = Self::Empty;
 
-        Poll::Ready(match tok {
-            Ok(tok) => Ok(tonic::Response::new(tok.proto())),
-            Err(e) => Err(tonic::Status::permission_denied("Token request denied")),
+                Some(
+                    recv
+                        .as_ref()
+                        .map(ApiToken::proto)
+                        .map_err(|_| tonic::Status::permission_denied("Token request denied"))
+                )
+            },
+            AuthTokenStreamProj::Empty => None,
         })
     }
 }
 
 impl ApiToken {
     /// Generate a new token from the given source of randomness
-    pub fn rand<R: Rng + CryptoRng>(mut rng: R, user: Arc<str>) -> Self {
+    pub fn rand<R: Rng + CryptoRng>(mut rng: R, user: String) -> Self {
+        let user = user.into();
         let issued = Utc::now();
         let mut key = std::iter::repeat_n(0u8, 64).collect::<Vec<_>>();
         rng.fill_bytes(&mut key);

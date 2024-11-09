@@ -1,8 +1,7 @@
 use std::path::Path;
 
-use dashmap::DashSet;
 
-use super::auth::{ApiAuthorization, ApiToken};
+use super::auth::ApiAuthorization;
 
 
 
@@ -30,7 +29,7 @@ impl ApiPersistent {
         }
 
     }
-
+    
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), ApiPersistError> {
         let writer = std::fs::File::create(path)?;
         serde_json::to_writer(writer, self)

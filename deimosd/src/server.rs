@@ -13,8 +13,8 @@ pub mod upnp;
 
 /// RPC server that listens for TCP connections and spawns tasks to serve clients
 pub struct Deimos {
-    upnp: Upnp,
     pub pods: PodManager,
+    upnp: Upnp,
     api: ApiState,
 }
 
@@ -82,6 +82,10 @@ impl Deimos {
             upnp,
             pods,
         };
+
+        if let Err(e) = this.api.save() {
+            tracing::error!("Failed to save API state: {}", e);
+        }
         
         Ok(())
     }
