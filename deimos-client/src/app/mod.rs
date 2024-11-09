@@ -1,6 +1,6 @@
 use std::{ops::Deref, process::ExitCode, sync::Arc};
 
-use fltk::{app::App, group::Group, prelude::{GroupExt, WidgetExt}, window::Window};
+use fltk::{app::App, enums::Align, group::Group, prelude::{GroupExt, WidgetExt}, window::Window};
 use once_cell::sync::OnceCell;
 use tokio::sync::Mutex;
 
@@ -59,6 +59,7 @@ pub async fn run() -> ExitCode {
     window.set_color(orbit::NIGHT[2]);
     window.make_resizable(true);
     window.set_label("Deimos");
+    window.set_align(Align::Inside | Align::Center);
 
     let state = DeimosStateHandle::default();
     

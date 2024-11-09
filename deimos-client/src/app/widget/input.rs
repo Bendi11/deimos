@@ -1,4 +1,4 @@
-use fltk::{enums::{Align, CallbackTrigger, Font}, frame::Frame, group::Flex, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack, PackType}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 
 use crate::app::orbit;
 
@@ -14,12 +14,12 @@ pub fn input_lbl(label: &str) -> Frame {
 }
 
 pub fn input_box<I: InputExt + Default>(label: &str) -> (impl GroupExt, I) {
-    let mut frame = Flex::default_fill().column();
-    let label = input_lbl(label);
-    frame.fixed(&label, 20);
+    let mut frame = Pack::default_fill();
+    frame.set_spacing(8);
+    frame.set_type(PackType::Vertical);
+    let label = input_lbl(label).with_size(frame.width(), 20);
 
-    let mut input = I::default();
-    frame.fixed(&input, 40);
+    let mut input = I::default().with_size(frame.width(), 40);
     input.set_frame(fltk::enums::FrameType::RShadowBox);
     input.set_text_color(orbit::MERCURY[1]);
     input.set_text_font(Font::Courier);

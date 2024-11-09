@@ -36,12 +36,12 @@ fn token_box(state: DeimosStateHandle) -> Flex {
     {
         let mut container = container.clone();
         tokio::task::spawn(async move {
-            let mut sub = state.ctx.clients.persistent.token.subscribe();
+            let mut sub = state.ctx.clients.token.subscribe();
             loop {
                 {
-                    let token = sub.borrow();
+                    let token = sub.borrow_and_update();
                     if let Some(ref token) = *token {
-                        title.set_label(token.user());
+                        title.set_label(&token.user);
                     } else {
                         container.hide();
                     }

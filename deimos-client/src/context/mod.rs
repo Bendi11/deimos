@@ -41,7 +41,7 @@ impl Context {
                 let mut api = self.clients.podapi().await;
                 let Some(ref mut api) = api else {
                     let timeout = {
-                        let r = self.clients.persistent.settings.read();
+                        let r = self.clients.settings.read();
                         r.connect_timeout
                     };
                     tokio::time::sleep(timeout).await;
@@ -56,7 +56,7 @@ impl Context {
                 Err(e) => {
                     if e.code() != tonic::Code::DeadlineExceeded {
                         let timeout = {
-                            let settings = self.clients.persistent.settings.read();
+                            let settings = self.clients.settings.read();
                             settings.connect_timeout
                         };
 
@@ -181,7 +181,6 @@ impl Context {
 
     pub async fn init(&self) {
         self.pods.set(Self::load_cached_pods(self.cache_dir.clone()).await);
-        self.clients.persistent.settings.notify();
     }
 }
 

@@ -1,25 +1,24 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
-use auth::PersistentToken;
-use deimosproto::{auth::DeimosTokenKey, client::DeimosServiceClient};
+use auth::{DeimosToken, PersistentToken, PersistentTokenKind};
+use deimosproto::client::DeimosServiceClient;
 use http::Uri;
-use layer::{cancel::{CancelLayer, CancelService}, conn::{ConnectionTracker, ConnectionTrackerLayer}};
+use layer::{auth::{AuthorizationLayer, AuthorizationService}, cancel::{CancelLayer, CancelService}, conn::{ConnectionTracker, ConnectionTrackerLayer}};
 use tokio::sync::{Mutex, Notify};
-use tonic::{metadata::MetadataValue, service::Interceptor, transport::{Channel, ClientTlsConfig}};
+use tonic::transport::{Channel, ClientTlsConfig};
 
 use super::NotifyMutation;
 
+pub mod auth;
 mod layer;
-mod auth;
 
-#[derive(Clone)]
-pub struct AuthenticationInterceptor(Option<DeimosTokenKey>);
 
 /// A client for the authorized pod control API
 pub type ApiClient = DeimosServiceClient<
-    tonic::service::interceptor::InterceptedService<
-        CancelService<ConnectionTracker<Channel>>,
-        AuthenticationInterceptor
+    AuthorizationService<
+        CancelService<
+            ConnectionTracker<Channel>
+        >
     >
 >;
 
@@ -32,8 +31,11 @@ pub type AuthClient = deimosproto::authclient::DeimosAuthorizationClient<CancelS
 pub struct ContextClients {
     /// Current connection state, updated by middleware in the client stack
     pub conn: NotifyMutation<ContextConnectionState>,
-    /// Persistent data maintained in save files for the clients
-    pub persistent: ContextPersistent,
+    /// Settings to be 
+    pub settings: NotifyMutation<ContextSettings>,
+    /// Unprotected token that is not saved on application exit, must remain synchronized with the
+    /// `token` in [persistent](ContextClients::persistent)
+    pub token: NotifyMutation<Option<DeimosToken>>,
     /// Notifier semaphore used to stop ongoing API requests when reloading settings or token
     cancel: Arc<Notify>,
     /// Collection of all service clients - these are reset whenever the API has to be reconnected
@@ -58,9 +60,9 @@ pub enum ContextConnectionState {
 /// Persistent state kept for the [Context]'s connection and authorization data
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextPersistent {
-    pub settings: NotifyMutation<ContextSettings>,
+    pub settings: ContextSettings,
     #[serde(default)]
-    pub token: NotifyMutation<Option<PersistentToken>>,
+    pub token: Option<PersistentToken>,
 }
 
 /// Settings that may be adjusted by the user
@@ -70,6 +72,7 @@ pub struct ContextSettings {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
+    pub token_protect: PersistentTokenKind,
 }
 
 impl ContextClients {
@@ -78,9 +81,22 @@ impl ContextClients {
         let cancel = Arc::new(Notify::new());
         let clients = Mutex::new(None);
 
+        let token = persistent.token.and_then(|tok| match tok.unprotect() {
+            Ok(tok) => Some(tok),
+            Err(e) => {
+                tracing::error!("Failed to unprotect persistent token: {}", e);
+                None
+            }
+        });
+        
+
+        let settings = NotifyMutation::new(persistent.settings);
+        let token = NotifyMutation::new(token);
+
         let this = Self {
-            persistent,
             conn,
+            settings,
+            token,
             cancel,
             clients,
         };
@@ -100,27 +116,15 @@ impl ContextClients {
 
     /// Reload the API connection using the given context settings
     pub async fn reload(&self, settings: ContextSettings) {
-        self.persistent.settings.set(settings.clone());
+        self.settings.set(settings.clone());
         self.connect_api().await;
     }
 
     /// Create a new gRPC client with the given connection settings, used to refresh the connection
     /// as settings are updated
     async fn connect_api(&self) {
-        let token = self.persistent.token.read().clone();
-        let token = match token {
-            Some(ref token) => match token.unprotect() {
-                Ok(unprotect) => Some(unprotect),
-                Err(e) => {
-                    tracing::error!("Failed to unprotect token: {}", e);
-                    return
-                }
-            },
-            None => None,
-        };
-        
         let channel = {
-            let settings = self.persistent.settings.read();
+            let settings = self.settings.read();
             Channel::builder(settings.server_uri.clone())
                 .connect_timeout(settings.connect_timeout)
                 .timeout(settings.request_timeout)
@@ -134,12 +138,12 @@ impl ContextClients {
         let mut lock = self.clients.lock().await;
         
         let channel = channel.connect_lazy();
-        let pods = DeimosServiceClient::with_interceptor(
+        let pods = DeimosServiceClient::new(
             tower::ServiceBuilder::new()
+                .layer(AuthorizationLayer::new(self.token.clone()))
                 .layer(CancelLayer::new(self.cancel.clone()))
                 .layer(ConnectionTrackerLayer::new(self.conn.clone()))
-                .service(channel.clone()),
-            AuthenticationInterceptor(token.map(|tok| tok.key))
+                .service(channel.clone())
         );
 
         let auth = AuthClient::new(
@@ -155,36 +159,31 @@ impl ContextClients {
             }
         );
     }
-}
+    
+    /// Get a copy of the current state that can be serialized to a save file
+    pub fn persistent(&self) -> ContextPersistent {
+        let settings = self.settings.read().clone();
 
-impl Interceptor for AuthenticationInterceptor {
-    fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
-        if let Some(ref token) = self.0 {
-            match MetadataValue::from_str(&token.to_base64()) {
-                Ok(val) => {
-                    request
-                        .metadata_mut()
-                        .insert(
-                            "authorization",
-                            val,
-                        );
-                },
-                Err(e) => {
-                    tracing::error!("Failed to create HTTP header for authorization token: {}", e);
-                }
+        let token = self.token.read().clone().and_then(|tok| match PersistentToken::protect(settings.token_protect, tok) {
+            Ok(tok) => Some(tok),
+            Err(e) => {
+                tracing::error!("Failed to protect persistent token: {}", e);
+                None
             }
-            
-        }
+        });
 
-        Ok(request)
+        ContextPersistent {
+            settings,
+            token,
+        }
     }
 }
 
 impl Default for ContextPersistent {
     fn default() -> Self {
         Self {
-            settings: NotifyMutation::new(ContextSettings::default()),
-            token: NotifyMutation::new(None),
+            settings: ContextSettings::default(),
+            token: None,
         }
     }
 }
@@ -195,6 +194,7 @@ impl Default for ContextSettings {
             server_uri: Uri::default(),
             request_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(60),
+            token_protect: PersistentTokenKind::Plaintext,
         }
     }
 }

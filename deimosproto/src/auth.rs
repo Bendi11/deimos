@@ -7,6 +7,8 @@ use base64::Engine;
 pub struct DeimosTokenKey(Arc<[u8]>);
 
 impl DeimosTokenKey {
+    pub const HTTP_HEADER_NAME: &str = "deimos-token";
+
     /// Create a new token from the given bytes
     pub fn from_bytes(data: Vec<u8>) -> Self {
         Self(Arc::from(data))
@@ -77,4 +79,3 @@ impl Drop for DeimosTokenKey {
         }
     }
 }
-

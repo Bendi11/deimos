@@ -94,13 +94,16 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
         let mut authentication_button = authentication_button.clone();
         tokio::task::spawn(
             async move {
-                let mut sub = state.ctx.clients.persistent.token.subscribe();
+                let mut sub = state.ctx.clients.token.subscribe();
                 loop {
-                    authentication_button.set_image(
-                        Some(
-                            if sub.borrow().is_some() { authentication_grey.clone() } else { authentication_red.clone() }
-                        )
-                    );
+                    {
+                        let token = sub.borrow_and_update();
+                        authentication_button.set_image(
+                            Some(
+                                if token.is_some() { authentication_grey.clone() } else { authentication_red.clone() }
+                            )
+                        );
+                    }
 
                     if sub.changed().await.is_err() {
                         break

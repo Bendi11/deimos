@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use deimosproto::auth::DeimosTokenKey;
-use zeroize::{Zeroize, Zeroizing};
 
 #[cfg(windows)]
 mod dpapi;
@@ -22,6 +21,7 @@ pub struct DeimosToken {
     pub user: Arc<str>,
     pub issued: DateTime<Utc>,
     pub key: DeimosTokenKey,
+    base64: Arc<str>,
 }
 
 
@@ -30,6 +30,12 @@ pub enum PersistentTokenKind {
     Plaintext,
     #[cfg(windows)]
     Dpapi,
+}
+
+impl DeimosToken {
+    pub fn base64(&self) -> &str {
+        &self.base64
+    }
 }
 
 impl PersistentToken {

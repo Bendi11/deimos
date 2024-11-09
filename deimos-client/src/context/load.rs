@@ -59,7 +59,7 @@ impl Context {
 
         match std::fs::File::create(&state_path) {
             Ok(w) => {
-                if let Err(e) = serde_json::to_writer::<_, ContextPersistent>(w, &self.clients.persistent) {
+                if let Err(e) = serde_json::to_writer::<_, ContextPersistent>(w, &self.clients.persistent()) {
                     tracing::error!(
                         "Failed to write context state to '{}': {}",
                         state_path.display(),

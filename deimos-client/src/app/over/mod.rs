@@ -9,8 +9,6 @@ use super::{orbit, widget, DeimosStateHandle};
 pub mod header;
 
 
-
-
 pub fn overview(state: DeimosStateHandle) -> Group {
     let mut top = {
         let top = Group::default_fill();
