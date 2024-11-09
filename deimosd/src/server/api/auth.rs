@@ -126,7 +126,7 @@ impl ApiToken {
         deimosproto::Token {
             name: self.user.to_string(),
             issued: self.issued.timestamp(),
-            key: self.key.to_bytes(),
+            key: self.key.as_bytes().to_owned(),
         }
     }
 }

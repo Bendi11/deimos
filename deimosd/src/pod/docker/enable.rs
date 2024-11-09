@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
+use bollard::secret::PortBinding;
+
 use crate::{pod::{config::PodDockerConfig, id::{DeimosId, DockerId}, state::PodEnable, Pod, PodManager, PodStateKnown}, server::upnp::UpnpLeaseData};
 
 impl PodManager {
@@ -32,7 +34,7 @@ impl PodManager {
             },
             PodStateKnown::Disabled => {
                 let leases = self.upnp.request(leases).await?;
-                let container = self.create_container(&pod).await?;
+                let container = self.create_container(pod.clone()).await?;
                 if let Err(e) = self.start_container(&pod, &container).await {
                     tracing::warn!(
                         "Container for pod {} failed to start, destroying it",
@@ -54,7 +56,7 @@ impl PodManager {
         Ok(())
     }
 
-    async fn create_container(&self, pod: &Pod) -> Result<DockerId, PodEnableError> {
+    async fn create_container(&self, pod: Arc<Pod>) -> Result<DockerId, PodEnableError> {
         let config = docker_config(&pod.config.docker);
         let create_response = self
             .docker
@@ -74,6 +76,8 @@ impl PodManager {
 
         let docker_id = DockerId::from(create_response.id);
         tracing::trace!("Created container {} for {}", docker_id, pod.id());
+
+        self.reverse_lookup.insert(docker_id.clone(), pod);
 
         Ok(docker_id)
     }
@@ -109,6 +113,24 @@ pub(super) fn docker_config(config: &PodDockerConfig) -> bollard::container::Con
             .collect()
     });
 
+    let port_bindings = (!config.port.is_empty()).then(|| {
+        config
+            .port
+            .iter()
+            .map(|conf| {
+                let key = format!("{}/{}", conf.expose, conf.protocol.docker_name());
+                let value = Some(vec![
+                    PortBinding {
+                        host_port: Some(conf.expose.to_string()),
+                        host_ip: None,
+                    }
+                ]);
+
+                (key, value)
+            })
+            .collect()
+    });
+
     let env = (!config.env.is_empty()).then(|| {
         config
             .env
@@ -125,8 +147,12 @@ pub(super) fn docker_config(config: &PodDockerConfig) -> bollard::container::Con
             .collect()
     });
 
+    let cap_add = (!config.cap_add.is_empty()).then_some(config.cap_add.clone());
+
     let host_config = Some(bollard::models::HostConfig {
         binds,
+        port_bindings,
+        cap_add,
         ..Default::default()
     });
 

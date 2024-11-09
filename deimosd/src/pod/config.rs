@@ -25,19 +25,23 @@ pub struct PodDockerConfig {
     pub stop_timeout: u32,
     /// List of volumes to mount inside the container
     #[serde(default)]
-    pub volume: Vec<ManagedContainerDockerMountConfig>,
+    pub volume: Vec<PodDockerMountConfig>,
     /// List of network ports to forward to the container
     #[serde(default)]
-    pub port: Vec<ManagedContainerDockerPortConfig>,
+    pub port: Vec<PodDockerPortConfig>,
     /// List of environment variables to define for the container
     #[serde(default)]
-    pub env: Vec<ManagedContainerDockerEnvConfig>,
+    pub env: Vec<PodDockerEnvConfig>,
+    /// List of capabilities to add to the process
+    #[serde(default)]
+    pub cap_add: Vec<String>,
 }
+
 
 /// Configuration for a local volume mounted to a Docker container
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ManagedContainerDockerMountConfig {
+pub struct PodDockerMountConfig {
     pub local: PathBuf,
     pub container: PathBuf,
 }
@@ -45,25 +49,25 @@ pub struct ManagedContainerDockerMountConfig {
 /// Configuration for a network port forwarded to the Docker container
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ManagedContainerDockerPortConfig {
+pub struct PodDockerPortConfig {
     pub expose: u16,
-    pub protocol: ManagedContainerDockerPortProtocol,
+    pub protocol: PodDockerPortProtocol,
     #[serde(default)]
     pub upnp: bool,
 }
 
 /// Selectable protocol for forwarded port
 #[derive(Clone, Copy, Debug, serde::Deserialize)]
-pub enum ManagedContainerDockerPortProtocol {
+pub enum PodDockerPortProtocol {
     #[serde(rename = "udp")]
     Udp,
-    #[serde(rename = "udp")]
+    #[serde(rename = "tcp")]
     Tcp,
 }
 
 /// Configuration for an environment variable to be set in the container
 #[derive(Debug, serde::Deserialize)]
-pub struct ManagedContainerDockerEnvConfig {
+pub struct PodDockerEnvConfig {
     pub key: String,
     pub value: String,
 }
@@ -102,7 +106,7 @@ impl DockerConnectionConfig {
     }
 }
 
-impl ManagedContainerDockerPortProtocol {
+impl PodDockerPortProtocol {
     /// Get the string to use when specifying the protocol to the Docker API
     pub const fn docker_name(&self) -> &'static str {
         match self {
@@ -112,11 +116,11 @@ impl ManagedContainerDockerPortProtocol {
     }
 }
 
-impl From<ManagedContainerDockerPortProtocol> for igd_next::PortMappingProtocol {
-    fn from(value: ManagedContainerDockerPortProtocol) -> Self {
+impl From<PodDockerPortProtocol> for igd_next::PortMappingProtocol {
+    fn from(value: PodDockerPortProtocol) -> Self {
         match value {
-            ManagedContainerDockerPortProtocol::Udp => Self::UDP,
-            ManagedContainerDockerPortProtocol::Tcp => Self::TCP,
+            PodDockerPortProtocol::Udp => Self::UDP,
+            PodDockerPortProtocol::Tcp => Self::TCP,
         }
     }
 }

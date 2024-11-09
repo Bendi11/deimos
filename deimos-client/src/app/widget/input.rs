@@ -1,4 +1,4 @@
-use fltk::{enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Flex, Group, Pack, PackType}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Pack, PackType}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 
 use crate::app::orbit;
 

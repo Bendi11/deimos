@@ -80,7 +80,7 @@ impl PodManager {
     ) -> Result<(), PodDisableError> {
         tracing::trace!("Destroying container {} for {}", container, pod.id());
 
-        self.docker
+        match self.docker
             .remove_container(
                 container,
                 Some(bollard::container::RemoveContainerOptions {
@@ -89,7 +89,13 @@ impl PodManager {
                 }),
             )
             .await
-            .map_err(PodDisableError::Destroy)
+            .map_err(PodDisableError::Destroy) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                self.reverse_lookup.remove(container);
+                Err(e)
+            }
+        }
     }
 }
 

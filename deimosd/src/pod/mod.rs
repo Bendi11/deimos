@@ -1,15 +1,11 @@
 use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
+    collections::HashMap, path::{Path, PathBuf}, sync::Arc, task::Poll, time::Duration
 };
 
 use bollard::{secret::EventMessageTypeEnum, system::EventsOptions, Docker};
 use dashmap::DashMap;
 use futures::{
-    stream::SelectAll,
-    StreamExt,
+    stream::{BoxStream, SelectAll}, Stream, StreamExt
 };
 use id::{DeimosId, DockerId};
 
@@ -30,7 +26,7 @@ pub struct PodManager {
     docker: Docker,
     upnp: Upnp,
     pods: HashMap<DeimosId, Arc<Pod>>,
-    reverse_lookup: DashMap<DockerId, Arc<Pod>>,
+    reverse_lookup: Arc<DashMap<DockerId, Arc<Pod>>>,
 }
 
 pub type PodStateStreamMapper = dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync;
@@ -40,6 +36,82 @@ pub type PodStateStream = SelectAll<
         Box<PodStateStreamMapper>,
     >,
 >;
+
+pub struct DockerEventStream {
+    inner: BoxStream<'static, Result<bollard::secret::EventMessage, bollard::errors::Error>>,
+    docker: Docker,
+    reverse: Arc<DashMap<DockerId, Arc<Pod>>>,
+}
+
+impl DockerEventStream {
+    fn subscribe(docker: &Docker) -> BoxStream<'static, Result<bollard::secret::EventMessage, bollard::errors::Error>> {
+        let mut filters = HashMap::with_capacity(1);
+        filters.insert("type", vec!["container"]);
+
+        tracing::trace!("Subscribing to Docker event stream with filters {:?}", filters);
+        docker.events(
+            Some(
+                EventsOptions::<&'static str> {
+                    filters,
+                    ..Default::default()
+                }
+            )
+        ).boxed()
+    }
+
+    fn new(docker: Docker, reverse: Arc<DashMap<DockerId, Arc<Pod>>>) -> Self {
+        Self {
+            inner: Self::subscribe(&docker),
+            docker,
+            reverse,
+        }
+    }
+}
+
+impl Stream for DockerEventStream {
+    type Item = (Arc<Pod>, String);
+
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            let next = futures::ready!(self.inner.as_mut().poll_next(cx));
+            match next {
+                Some(event) => match event {
+                    Ok(ev) => match ev.typ {
+                        Some(EventMessageTypeEnum::CONTAINER) => {
+                            let Some(actor) = ev.actor else {
+                                tracing::warn!("Received container event with no actor");
+                                continue;
+                            };
+
+                            let Some(id) = actor.id else {
+                                tracing::warn!("Received container event with no actor ID");
+                                continue;
+                            };
+
+                            let Some(action) = ev.action else {
+                                tracing::warn!("Received container event with no action");
+                                continue;
+                            };
+
+                            if let Some(pod) = self.reverse.get(id.as_str()) {
+                                break Poll::Ready(Some((pod.clone(), action)))
+                            }
+                        },
+                        _ => {
+                            tracing::warn!("Got unwanted Docker event {:?}", ev.typ);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("Docker event stream closed unexpectedly: {}", e);
+                    }
+                },
+                None => {
+                    self.inner = Self::subscribe(&self.docker);
+                }
+            }
+        }
+    }
+}
 
 impl PodManager {
     /// Load a config TOML file from the given path, and use the options specified inside to
@@ -71,7 +143,7 @@ impl PodManager {
             tracing::warn!("Starting pod manager with no pods configured");
         }
 
-        let reverse_lookup = DashMap::with_capacity(pods.len());
+        let reverse_lookup = Arc::new(DashMap::with_capacity(pods.len()));
 
         Ok(Self {
             config,
@@ -100,59 +172,31 @@ impl PodManager {
     }
     
     /// Process all Docker container events in a loop to monitor uncommanded pod state changes
-    pub async fn eventloop(&self) {
-        loop {
-            let mut filters = HashMap::with_capacity(1);
-            filters.insert("type", vec!["container"]);
-
-            tracing::trace!("Subscribing to Docker event stream with filters {:?}", filters);
-            let mut stream = self.docker.events(
-                Some(
-                    EventsOptions::<&'static str> {
-                        filters,
-                        ..Default::default()
-                    }
-                )
-            );
-
-            while let Some(result) = stream.next().await {
-                match result {
-                    Ok(ev) => match ev.typ {
-                        Some(EventMessageTypeEnum::CONTAINER) => {
-                            let Some(actor) = ev.actor else {
-                                tracing::warn!("Received container event with no actor");
-                                continue;
-                            };
-
-                            let Some(id) = actor.id else {
-                                tracing::warn!("Received container event with no actor ID");
-                                continue;
-                            };
-
-                            let Some(action) = ev.action else {
-                                tracing::warn!("Received container event with no action");
-                                continue;
-                            };
-
-                            if let Some(pod) = self.pods.get(id.as_str()) {
-                                self.handle_event(pod.clone(), action).await;
-                            }
-                        },
-                        _ => {
-                            tracing::warn!("Got unwanted Docker event {:?}", ev.typ);
-                        }
-                    },
-                    Err(e) => {
-                        tracing::error!("Docker event stream closed unexpectedly: {}", e);
-                        break
-                    }
-                }
-            }
-        }
+    pub fn eventloop(&self) -> impl Stream<Item = (Arc<Pod>, String)> {
+        DockerEventStream::new(self.docker.clone(), self.reverse_lookup.clone())
     }
-
-    async fn handle_event(&self, pod: Arc<Pod>, action: String) {
+    
+    /// Handle an event received from the [eventloop](Self::eventloop) stream
+    pub async fn handle_event(&self, pod: Arc<Pod>, action: String) {
         tracing::trace!("Pod {} got event '{}'", pod.id(), action);
+        let state = pod.state_wait().await;
+
+        match action.as_str() {
+            "die" => match state {
+                PodStateKnown::Disabled => {
+
+                },
+                PodStateKnown::Paused(..) => {
+                    tracing::info!("Paused container {} died unexpectedly", pod.id());
+                    let _ = self.disable(pod).await;
+                },
+                PodStateKnown::Enabled(..) => {
+                    tracing::warn!("Running container {} died unexpectedly", pod.id());
+                    let _ = self.disable(pod).await;
+                }
+            },
+            _ => {},
+        }
     }
 
     /// Load all containers from directory entries in the given containers directory,

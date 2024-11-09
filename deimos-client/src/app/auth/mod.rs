@@ -35,7 +35,7 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
     reqtitle.set_align(Align::Inside | Align::Left);
 
     let request = request_group(state.clone());
-    top.fixed(&request, request.height());
+    top.fixed(&request, 160);
 
     top.end();
     top.as_group().unwrap()
@@ -101,19 +101,25 @@ fn request_group(state: DeimosStateHandle) -> Pack {
                 loop {
                     {
                         let token = sub.borrow();
+                        fltk::app::lock().ok();
+                        request_button.activate();
                         match *token {
                             TokenStatus::Denied { ref reason } => {
                                 status.set_label_color(orbit::MARS[2]);
                                 status.set_label(reason);
                             },
                             TokenStatus::Requested { ref user, .. } => {
-                                status.set_label_color(orbit::MERCURY[1]);
+                                status.set_label_color(orbit::EARTH[1]);
                                 status.set_label(&format!("Requested token with username '{}'", user));
+                                request_button.deactivate();
                             },
                             TokenStatus::None | TokenStatus::Token(..) => {
                                 status.set_label("");
                             },
                         }
+
+                        fltk::app::unlock();
+                        fltk::app::awake();
                     }
 
                     if sub.changed().await.is_err() {

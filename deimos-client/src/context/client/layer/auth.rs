@@ -46,7 +46,7 @@ where
     }
     
     fn call(&mut self, mut req: Request<B>) -> Self::Future {
-        if let Some(ref token) = self.token.read().token() {
+        if let Some(token) = self.token.read().token() {
             match HeaderValue::from_str(token.base64()) {
                 Ok(auth) => {
                     req.headers_mut().insert(DeimosTokenKey::HTTP_HEADER_NAME, auth);

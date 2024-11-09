@@ -124,7 +124,7 @@ impl ContextClients {
             Err(e) => {
                 tracing::warn!("Failed to request token from server: {}", e);
                 self.token.set(
-                    TokenStatus::Denied { reason: e.to_string() }
+                    TokenStatus::Denied { reason: e.message().to_owned() }
                 );
                 return;
             }

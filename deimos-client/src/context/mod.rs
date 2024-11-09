@@ -36,6 +36,7 @@ impl Context {
     /// required
     pub async fn pod_event_loop(&self) -> ! {            
         let mut sub = self.clients.settings.subscribe();
+        let mut token_sub = self.clients.token.subscribe();
         loop {
             let stream = {
                 let mut api = self.clients.podapi().await;
@@ -45,6 +46,9 @@ impl Context {
                     tokio::select! {
                         _ = sub.changed() => {
                             sub.borrow_and_update();
+                        },
+                        _ = token_sub.changed() => {
+                            token_sub.borrow_and_update();
                         },
                         _ = tokio::time::sleep(timeout) => {},
                     };

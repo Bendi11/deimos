@@ -1,6 +1,7 @@
 use std::{path::{Path, PathBuf}, sync::Arc};
 
 use tokio::sync::Mutex;
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::server::{upnp::UpnpLease, Deimos};
@@ -34,6 +35,7 @@ pub enum PodState {
 }
 
 /// State of a pod with the guarantee that the state is always known
+#[derive(Clone)]
 pub enum PodStateKnown {
     Disabled,
     Paused(PodPaused),
@@ -41,12 +43,14 @@ pub enum PodStateKnown {
 }
 
 /// State maintained for a pod that is running
+#[derive(Clone)]
 pub struct PodEnable {
     pub docker_id: DockerId,
     pub upnp_lease: UpnpLease,
 }
 
 /// State maintained for a pod that has been paused and can be quickly restarted
+#[derive(Clone)]
 pub struct PodPaused {
     pub docker_id: DockerId,
 }
@@ -54,12 +58,18 @@ pub struct PodPaused {
 impl Deimos {
     /// Monitor events received from the local Docker instance
     pub async fn pod_task(self: Arc<Self>, cancel: CancellationToken) {
-        tokio::select! {
-            _ = cancel.cancelled() => {},
-            _ = self.pods.eventloop() => {
-                tracing::error!("Pod event loop exited");
-            }
-        };
+        let mut events = self.pods.eventloop();
+        
+
+        while let Some((pod, action)) = tokio::select! {
+            _ = cancel.cancelled() => None,
+            v = events.next() => v,
+        } {
+            let this = self.clone();
+            tokio::task::spawn(async move {
+                this.pods.handle_event(pod, action).await;
+            });
+        }
 
         self.pods.disable_all().await;
     }
@@ -85,6 +95,12 @@ impl Pod {
     /// and return
     pub async fn state_lock(&self) -> PodStateWriteHandle {
         self.state.lock().await
+    }
+    
+    /// Wait for concurrent mutations to the pod's state to finish and return the most recent known
+    /// state
+    pub async fn state_wait(&self) -> PodStateKnown {
+        self.state.wait().await
     }
 
     /// Load the pod from config files located in the given directory
@@ -120,6 +136,12 @@ impl PodStateHandle {
             lock,
             tx: self.tx.clone(),
         }
+    }
+    
+    /// Wait for all writers to finish and return the most current state of the pod
+    pub async fn wait(&self) -> PodStateKnown {
+        let lock = self.lock.lock().await;
+        lock.clone()
     }
 
     /// Get the current state
