@@ -103,10 +103,15 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
 
                         authentication_button.set_image(
                             Some(
-                                if token.is_some() { authentication_grey.clone() } else { authentication_red.clone() }
+                                if token.token().is_some() { authentication_grey.clone() } else { authentication_red.clone() }
                             )
                         );
-                        authentication_button.resize(authentication_button.x(), authentication_button.y(), authentication_button.w(), authentication_button.h());
+                        authentication_button.resize(
+                            authentication_button.x(),
+                            authentication_button.y(),
+                            authentication_button.w(),
+                            authentication_button.h()
+                        );
                         authentication_button.set_damage(true);
 
                         fltk::app::unlock();

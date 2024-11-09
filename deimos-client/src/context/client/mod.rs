@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use auth::{DeimosToken, PersistentToken, PersistentTokenKind};
+use auth::{DeimosToken, PersistentToken, PersistentTokenKind, TokenStatus};
 use chrono::Utc;
 use deimosproto::client::DeimosServiceClient;
 use futures::StreamExt;
@@ -35,9 +35,7 @@ pub struct ContextClients {
     pub conn: NotifyMutation<ContextConnectionState>,
     /// Settings to be 
     pub settings: NotifyMutation<ContextSettings>,
-    /// Unprotected token that is not saved on application exit, must remain synchronized with the
-    /// `token` in [persistent](ContextClients::persistent)
-    pub token: NotifyMutation<Option<DeimosToken>>,
+    pub token: NotifyMutation<TokenStatus>,
     /// Notifier semaphore used to stop ongoing API requests when reloading settings or token
     cancel: Arc<Notify>,
     /// Collection of all service clients - these are reset whenever the API has to be reconnected
@@ -60,7 +58,7 @@ pub enum ContextConnectionState {
 }
 
 /// Persistent state kept for the [Context]'s connection and authorization data
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextPersistent {
     pub settings: ContextSettings,
     #[serde(default)]
@@ -90,8 +88,8 @@ impl ContextClients {
                 None
             }
         });
-        
 
+        let token = TokenStatus::from_token(token);
         let settings = NotifyMutation::new(persistent.settings);
         let token = NotifyMutation::new(token);
 
@@ -108,8 +106,13 @@ impl ContextClients {
         this
     }
     
+    /// Request a new token with the given username from the server
     pub async fn request_token(&self, user: String) {
+        self.cancel.notify_waiters();
         let Some(mut auth) = self.authapi().await else { return };
+
+        let cancel = Arc::new(Notify::new());
+        self.token.set(TokenStatus::Requested { user: user.clone(), cancel: cancel.clone() });
         
         let request = deimosproto::TokenRequest {
             user,
@@ -120,30 +123,38 @@ impl ContextClients {
             Ok(stream) => stream.into_inner(),
             Err(e) => {
                 tracing::warn!("Failed to request token from server: {}", e);
+                self.token.set(
+                    TokenStatus::Denied { reason: e.to_string() }
+                );
                 return;
             }
         };
-        
+
         let own_token = self.token.clone();
 
         tokio::task::spawn(async move {
-            match stream.next().await {
+            let next = tokio::select! {
+                _ = cancel.notified() => {
+                    own_token.set(TokenStatus::None);
+                    return
+                },
+                result = stream.next() => result,
+            };
+
+            let reason = match next {
                 Some(Ok(token)) => match DeimosToken::from_proto(token) {
                     Ok(token) => {
                         tracing::info!("Got new token from server {:?}", token);
-                        own_token.set(Some(token));
+                        own_token.set(TokenStatus::Token(token));
+                        return
                     },
-                    Err(e) => {
-                        tracing::error!("Failed to decode received token: {}", e)
-                    },
+                    Err(e) => format!("Failed to decode received token: {}", e),
                 }
-                Some(Err(e)) => {
-                    tracing::warn!("Failed to receive token from server: {}", e)
-                },
-                None => {
-                    tracing::warn!("Token request stream closed before token was received");
-                }
-            }
+                Some(Err(e)) => format!("Failed to receive token from server: {}", e),
+                None => String::from("Token request stream closed before token was received"),
+            };
+
+            own_token.set(TokenStatus::Denied { reason });
         });
     }
     
@@ -212,7 +223,12 @@ impl ContextClients {
     pub fn persistent(&self) -> ContextPersistent {
         let settings = self.settings.read().clone();
 
-        let token = self.token.read().clone().and_then(|tok| match PersistentToken::protect(settings.token_protect, tok) {
+        let token = self
+            .token
+            .read()
+            .token()
+            .cloned()
+            .and_then(|tok| match PersistentToken::protect(settings.token_protect, tok) {
             Ok(tok) => Some(tok),
             Err(e) => {
                 tracing::error!("Failed to protect persistent token: {}", e);
@@ -223,15 +239,6 @@ impl ContextClients {
         ContextPersistent {
             settings,
             token,
-        }
-    }
-}
-
-impl Default for ContextPersistent {
-    fn default() -> Self {
-        Self {
-            settings: ContextSettings::default(),
-            token: None,
         }
     }
 }

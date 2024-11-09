@@ -11,7 +11,8 @@ impl Context {
         let config_path = cache_dir.join(Self::STATE_FILE_NAME);
         match std::fs::File::open(&config_path) {
             Ok(rdr) => Ok(
-                serde_json::from_reader::<_, ContextPersistent>(rdr).map_err(|e| LoadStateError {
+                serde_json::from_reader::<_, ContextPersistent>(rdr)
+                    .map_err(|e| LoadStateError {
                     config_path: config_path.clone(),
                     kind: LoadStateErrorKind::Parse(e),
                 })?,

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use deimosproto::auth::DeimosTokenKey;
+use tokio::sync::Notify;
 
 #[cfg(windows)]
 mod dpapi;
@@ -12,6 +13,20 @@ mod dpapi;
 pub struct PersistentToken {
     pub kind: PersistentTokenKind,
     pub data: DeimosToken,
+}
+
+
+#[derive(Debug, Clone)]
+pub enum TokenStatus {
+    None,
+    Requested {
+        user: String,
+        cancel: Arc<Notify>,
+    },
+    Denied {
+        reason: String,
+    },
+    Token(DeimosToken),
 }
 
 
@@ -30,6 +45,24 @@ pub enum PersistentTokenKind {
     Plaintext,
     #[cfg(windows)]
     Dpapi,
+}
+
+impl TokenStatus {
+    /// Get the token if one is stored
+    pub const fn token(&self) -> Option<&DeimosToken> {
+        match self {
+            Self::Token(ref tok) => Some(tok),
+            _ => None,
+        }
+    }
+    
+    /// Convert an optional token into a [TokenStatus]
+    pub fn from_token(tok: Option<DeimosToken>) -> Self {
+        match tok {
+            Some(tok) => Self::Token(tok),
+            None => Self::None,
+        }
+    }
 }
 
 impl DeimosToken {
@@ -52,6 +85,20 @@ impl DeimosToken {
             base64,
         })
     }
+    
+    /// Apply a fallible function to the contained key and return the new token if the map succeeds
+    pub fn try_map<E, F: FnOnce(&[u8]) -> Result<Vec<u8>, E>>(&self, f: F) -> Result<Self, E> {
+        f(self.key.as_bytes())
+            .map(DeimosTokenKey::from_bytes)
+            .map(|key| 
+                Self {
+                    user: self.user.clone(),
+                    issued: self.issued,
+                    base64: key.to_base64().into(),
+                    key,
+                }
+            )
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -73,29 +120,30 @@ impl PersistentToken {
 
     /// Encrypt the given token's key using platform specific APIs and return it
     pub fn protect(kind: PersistentTokenKind, data: DeimosToken) -> Result<Self, String> {
-        match kind {
-            PersistentTokenKind::Plaintext => Ok(
-                Self {
-                    kind,
-                    data,
-                }
-            ),
-            #[cfg(windows)]
-            PersistentTokenKind::Dpapi => Ok(
-                Self {
-                    kind,
-                    data: auth::dpapi::unprotect(&data).map_err(|e| e.to_string()),      
-                }
-            ),
-        }
+        Ok(Self {
+            data: match kind {
+                PersistentTokenKind::Plaintext => data,
+                #[cfg(windows)]
+                PersistentTokenKind::Dpapi => data.try_map(|data| auth::dpapi::protect(data).map_err(|e| e.to_string()))?,
+            },
+            kind,
+        })
     }
     
     /// Decrypt the contents of this token using platform-specific APIs specified in the [PersistentTokenKind]
     pub fn unprotect(&self) -> Result<DeimosToken, String>  {
         match self.kind {
-            PersistentTokenKind::Plaintext => Ok(self.data.clone().into()),
+            PersistentTokenKind::Plaintext => Ok(self.data.clone()),
             #[cfg(windows)]
-            PersistentTokenKind::Dpapi => auth::dpapi::protect(&self.data).map(Into::into).map_err(|e| e.to_string()),
+            PersistentTokenKind::Dpapi => self.data.try_map(|data| auth::dpapi::unprotect(data).map_err(|e| e.to_string())),
+        }
+    }
+}
+
+impl Drop for TokenStatus {
+    fn drop(&mut self) {
+        if let Self::Requested { user: _, cancel } = self {
+            cancel.notify_waiters();
         }
     }
 }

@@ -10,9 +10,9 @@ pub struct DeimosTokenKey(Arc<[u8]>);
 impl DeimosTokenKey {
     pub const HTTP_HEADER_NAME: &str = "deimos-token";
     
-    /// Copy bytes out of this key and return it as an owned Vec
-    pub fn to_bytes(&self) -> Vec<u8> {
-        Vec::from(&self.0 as &[u8])
+    /// Get a reference to the bytes of this key
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0 as &[u8]
     }
 
     /// Create a new token from the given bytes

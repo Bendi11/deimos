@@ -2,20 +2,20 @@ use deimosproto::auth::DeimosTokenKey;
 use http::{HeaderValue, Request};
 use tower::{Layer, Service};
 
-use crate::context::{client::auth::DeimosToken, NotifyMutation};
+use crate::context::{client::auth::TokenStatus, NotifyMutation};
 
 pub struct AuthorizationLayer {
-    token: NotifyMutation<Option<DeimosToken>>,
+    token: NotifyMutation<TokenStatus>,
 }
 
 #[derive(Debug, Clone)]
 pub struct AuthorizationService<S> {
     inner: S,
-    token: NotifyMutation<Option<DeimosToken>>,
+    token: NotifyMutation<TokenStatus>,
 }
 
 impl AuthorizationLayer {
-    pub const fn new(token: NotifyMutation<Option<DeimosToken>>) -> Self {
+    pub const fn new(token: NotifyMutation<TokenStatus>) -> Self {
         Self {
             token
         }
@@ -33,7 +33,6 @@ impl<S> Layer<S> for AuthorizationLayer {
     }
 }
 
-
 impl<S, B, R> Service<Request<B>> for AuthorizationService<S>
 where 
     S: Service<Request<B>, Response = R>
@@ -47,7 +46,7 @@ where
     }
     
     fn call(&mut self, mut req: Request<B>) -> Self::Future {
-        if let Some(ref token) = *self.token.read() {
+        if let Some(ref token) = self.token.read().token() {
             match HeaderValue::from_str(token.base64()) {
                 Ok(auth) => {
                     req.headers_mut().insert(DeimosTokenKey::HTTP_HEADER_NAME, auth);

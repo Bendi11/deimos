@@ -1,9 +1,6 @@
 use std::{
-    io::Write,
-    path::{Path, PathBuf}, sync::Arc,
+    collections::HashMap, io::Write, path::{Path, PathBuf}, sync::Arc
 };
-
-use im::HashMap;
 
 use super::{Context, NotifyMutation};
 

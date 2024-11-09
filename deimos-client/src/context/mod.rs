@@ -1,15 +1,14 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use client::{ContextClients, ContextPersistent};
 use futures::StreamExt;
-use im::HashMap;
 use pod::{CachedPod, CachedPodData, CachedPodState};
 
 mod load;
 pub mod client;
 pub mod pod;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct NotifyMutation<T>(tokio::sync::watch::Sender<T>);
 
 /// Context shared across the application used to perform API requests and maintain a local
@@ -188,7 +187,6 @@ impl Context {
     }
 }
 
-
 impl<T> NotifyMutation<T> {
     /// Create a new wrapper that will notify UI elements of mutations to the given value
     pub fn new(val: T) -> Self {
@@ -215,6 +213,12 @@ impl<T> NotifyMutation<T> {
     /// Notify waiting subscribers without modifying the contained value
     pub fn notify(&self) {
         self.0.send_modify(|_| ());
+    }
+}
+
+impl<T> Clone for NotifyMutation<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
