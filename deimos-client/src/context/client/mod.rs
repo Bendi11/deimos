@@ -1,7 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use auth::{DeimosToken, PersistentToken, PersistentTokenKind};
+use chrono::Utc;
 use deimosproto::client::DeimosServiceClient;
+use futures::StreamExt;
 use http::Uri;
 use layer::{auth::{AuthorizationLayer, AuthorizationService}, cancel::{CancelLayer, CancelService}, conn::{ConnectionTracker, ConnectionTrackerLayer}};
 use tokio::sync::{Mutex, Notify};
@@ -106,11 +108,57 @@ impl ContextClients {
         this
     }
     
+    pub async fn request_token(&self, user: String) {
+        let Some(mut auth) = self.authapi().await else { return };
+        
+        let request = deimosproto::TokenRequest {
+            user,
+            datetime: Utc::now().timestamp(),
+        };
+
+        let mut stream = match auth.request_token(request).await {
+            Ok(stream) => stream.into_inner(),
+            Err(e) => {
+                tracing::warn!("Failed to request token from server: {}", e);
+                return;
+            }
+        };
+        
+        let own_token = self.token.clone();
+
+        tokio::task::spawn(async move {
+            match stream.next().await {
+                Some(Ok(token)) => match DeimosToken::from_proto(token) {
+                    Ok(token) => {
+                        tracing::info!("Got new token from server {:?}", token);
+                        own_token.set(Some(token));
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to decode received token: {}", e)
+                    },
+                }
+                Some(Err(e)) => {
+                    tracing::warn!("Failed to receive token from server: {}", e)
+                },
+                None => {
+                    tracing::warn!("Token request stream closed before token was received");
+                }
+            }
+        });
+    }
+    
     /// Get the authorized pods API client if one is available
     pub async fn podapi(&self) -> Option<tokio::sync::MappedMutexGuard<ApiClient>> {
         tokio::sync::MutexGuard::try_map(
             self.clients.lock().await,
             |opt| opt.as_mut().map(|c| &mut c.pods)
+        ).ok()
+    }
+
+    async fn authapi(&self) -> Option<tokio::sync::MappedMutexGuard<AuthClient>> {
+        tokio::sync::MutexGuard::try_map(
+            self.clients.lock().await,
+            |opt| opt.as_mut().map(|c| &mut c.auth)
         ).ok()
     }
 

@@ -1,6 +1,6 @@
 use std::{str::FromStr, time::Duration};
 
-use fltk::{enums::Align, group::{Group, Pack, PackType}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{group::{Group, Pack, PackType}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
 use crate::context::client::{auth::PersistentTokenKind, ContextSettings};
@@ -17,26 +17,12 @@ pub fn settings(state: DeimosStateHandle) -> Group {
     top.set_color(orbit::NIGHT[2]);
     top.hide();
     
-    /*let mut column = Flex::default()
-        .column()
-        .with_size(top.width() - 32, top.height())
-        .center_of(&top);
-    column.set_color(orbit::NIGHT[2]);
-    column.set_spacing(32);*/
-    
-    let mut save_button = {
-        //let top_bar = Pack::default().with_size(top.width(), 42);
-        //column.fixed(&top_bar, 42);
-
-        let save = SvgImage::from_data(include_str!("../../assets/check.svg")).unwrap();
-        let save_img = widget::svg::svg_color(save, 42, orbit::SOL[1]);
-        let mut save_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
-        save_button.set_size(42, 42);
-        save_button.set_image_scaled(Some(save_img));
-        save_button.resize_callback(widget::svg::resize_image_cb(0, 0));
-
-        save_button
-    };
+    let save = SvgImage::from_data(include_str!("../../assets/check.svg")).unwrap();
+    let save_img = widget::svg::svg_color(save, 42, orbit::SOL[1]);
+    let mut save_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+    save_button.set_size(42, 42);
+    save_button.set_image_scaled(Some(save_img));
+    save_button.resize_callback(widget::svg::resize_image_cb(0, 0));
    
 
 

@@ -35,7 +35,7 @@ thiserror = "1.0"
 
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-chrono = { workspace = true, features = ["serde"] }
+chrono = { workspace = true }
 
 im = { version = "15.1", features = ["serde"] }
 arraydeque = "0.5"

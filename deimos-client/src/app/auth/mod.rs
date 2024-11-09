@@ -1,24 +1,36 @@
-use fltk::{enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group}, image::SvgImage, prelude::*};
+use fltk::{enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType}, image::SvgImage, input::Input, prelude::*};
 
 use super::{orbit, widget, DeimosStateHandle};
 
 
 
 pub fn authorization(state: DeimosStateHandle) -> Group {
-    let mut top = Group::default_fill();
+    let mut top = Pack::default_fill();
+    top.set_color(orbit::NIGHT[2]);
+    top.set_type(PackType::Vertical);
+    top.set_size(top.width() - 8, top.height());
+    top.set_pos(8, 0);
     top.hide();
-    let mut column = Flex::default_fill().column();
-    column.set_margins(16, 0, 16, 0);
 
-    let header = header(state.clone());
-    column.fixed(&header, 64);
-
-    token_box(state);
+    header(state.clone()).with_size(top.width(), 42);
+    token_box(state.clone()).with_size(top.width(), 240);
     
+    let (frame, username) = widget::input::input_box::<Input>("Requested Token Username");
+    let mut request_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+    request_button.set_size(top.width(), 40);
+    request_button.set_label("Request Token");
+    request_button.set_label_color(orbit::MERCURY[0]);
+    
+    request_button.set_callback(move |_| {
+        let state = state.clone();
+        let username = username.clone();
+        tokio::task::spawn(async move {
+            state.ctx.clients.request_token(username.value()).await;
+        });
+    });
 
-    column.end();
     top.end();
-    top
+    top.as_group().unwrap()
 }
 
 fn token_box(state: DeimosStateHandle) -> Flex {

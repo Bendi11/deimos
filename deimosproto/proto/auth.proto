@@ -4,7 +4,8 @@ package deimos;
 
 message Token {
     string name = 1;
-    bytes token = 2;
+    int64 issued = 2;
+    bytes key = 3;
 }
 
 message TokenRequest {

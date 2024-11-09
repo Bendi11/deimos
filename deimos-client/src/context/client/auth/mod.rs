@@ -33,9 +33,31 @@ pub enum PersistentTokenKind {
 }
 
 impl DeimosToken {
+    /// Get a chached base64 string representing the token
     pub fn base64(&self) -> &str {
         &self.base64
     }
+    
+    /// Decode a protobuf containing a token
+    pub fn from_proto(proto: deimosproto::Token) -> Result<Self, DeimosTokenConvertError>  {
+        let user = proto.name.into();
+        let issued = DateTime::<Utc>::from_timestamp(proto.issued, 0).ok_or(DeimosTokenConvertError::DateTime)?;
+        let key = DeimosTokenKey::from_bytes(proto.key);
+        let base64 = key.to_base64().into();
+
+        Ok(Self {
+            user,
+            issued,
+            key,
+            base64,
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeimosTokenConvertError {
+    #[error("Out of range UNIX timestamp")]
+    DateTime,
 }
 
 impl PersistentToken {
