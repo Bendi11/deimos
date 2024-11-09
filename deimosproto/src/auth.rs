@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::{hash::{Hasher, SipHasher}, sync::Arc};
 
 use base64::Engine;
+use blake2::Blake2b;
 
 /// A deimos token that serializes to base64
 #[derive(Clone)]
@@ -34,6 +35,14 @@ impl DeimosTokenKey {
     /// Get a new base64 engine to be used to serialize and deserialize the token
     const fn engine() -> base64::engine::GeneralPurpose {
         base64::engine::GeneralPurpose::new(&base64::alphabet::URL_SAFE, base64::engine::GeneralPurposeConfig::new())
+    }
+    
+    pub fn fingerprint(&self) -> String {
+        use blake2::Digest;
+        let mut hash = Blake2b::<blake2::digest::consts::U8>::new();
+        hash.update(&self.0);
+
+        format!("{:x}", hash.finalize())
     }
 }
 

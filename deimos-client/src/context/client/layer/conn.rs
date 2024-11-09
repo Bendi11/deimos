@@ -83,15 +83,17 @@ where
         let response = futures::ready!(project.inner.poll(cx));
         match response {
             Ok(response) => {
-                if let Some(status) = tonic::Status::from_header_map(response.headers()) {
-                    let connstat = match status.code() {
+                let connstat = if let Some(status) = tonic::Status::from_header_map(response.headers()) {
+                    match status.code() {
                         Code::Ok => ContextConnectionState::Connected,
                         Code::Unauthenticated => ContextConnectionState::NoToken,
                         _ => ContextConnectionState::Error,
-                    };
+                    }
+                } else {
+                    ContextConnectionState::Connected
+                };
 
-                    project.conn.set(connstat);
-                }
+                project.conn.set(connstat);  
 
                 Poll::Ready(Ok(response))
             },

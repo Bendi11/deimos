@@ -30,9 +30,21 @@ pub struct ApiAuthorization {
 
 impl ApiAuthorization {
     pub fn issue(&self, name: String) -> ApiToken {
-        let token = ApiToken::rand(OsRng, name);
-        self.tokens.insert(token.key.to_base64(), token.clone());
-        token
+        for _ in 0..16 {
+            let token = ApiToken::rand(OsRng, name.clone());
+            let base64 = token.key.to_base64();
+            match self.tokens.get(&base64) {
+                Some(exist) => {
+                    tracing::warn!("Generated API token identical to existing: new for '{}' collides with token issued for '{}'", token.user, exist.user);
+                },
+                None => {
+                    self.tokens.insert(token.key.to_base64(), token.clone());
+                    return token
+                }
+            }
+        }
+        
+        panic!("Generated duplicate tokens over 16 times - something is wrong with PRNG");
     }
 }
 
@@ -97,7 +109,7 @@ impl ApiToken {
     pub fn rand<R: Rng + CryptoRng>(mut rng: R, user: String) -> Self {
         let user = user.into();
         let issued = Utc::now();
-        let mut key = std::iter::repeat_n(0u8, 64).collect::<Vec<_>>();
+        let mut key = std::iter::repeat(0u8).take(64).collect::<Vec<_>>();
         rng.fill_bytes(&mut key);
 
         let key = DeimosTokenKey::from_bytes(key);
@@ -118,5 +130,3 @@ impl ApiToken {
         }
     }
 }
-
-

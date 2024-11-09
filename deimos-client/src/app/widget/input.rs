@@ -17,7 +17,7 @@ pub fn input_box<I: InputExt + Default>(label: &str) -> (impl GroupExt, I) {
     let mut frame = Pack::default_fill();
     frame.set_spacing(8);
     frame.set_type(PackType::Vertical);
-    let label = input_lbl(label).with_size(frame.width(), 20);
+    input_lbl(label).with_size(frame.width(), 20);
 
     let mut input = I::default().with_size(frame.width(), 40);
     input.set_frame(fltk::enums::FrameType::RShadowBox);

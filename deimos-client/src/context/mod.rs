@@ -35,16 +35,20 @@ impl Context {
     
     /// Wait for pod status notifications and update the local cache with their statuses as
     /// required
-    pub async fn pod_event_loop(&self) -> ! {
+    pub async fn pod_event_loop(&self) -> ! {            
+        let mut sub = self.clients.settings.subscribe();
         loop {
             let stream = {
                 let mut api = self.clients.podapi().await;
                 let Some(ref mut api) = api else {
-                    let timeout = {
-                        let r = self.clients.settings.read();
-                        r.connect_timeout
+                    let timeout = sub.borrow_and_update().connect_timeout;
+
+                    tokio::select! {
+                        _ = sub.changed() => {
+                            sub.borrow_and_update();
+                        },
+                        _ = tokio::time::sleep(timeout) => {},
                     };
-                    tokio::time::sleep(timeout).await;
                     continue
                 };
 

@@ -98,11 +98,19 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
                 loop {
                     {
                         let token = sub.borrow_and_update();
+
+                        fltk::app::lock().ok();
+
                         authentication_button.set_image(
                             Some(
                                 if token.is_some() { authentication_grey.clone() } else { authentication_red.clone() }
                             )
                         );
+                        authentication_button.resize(authentication_button.x(), authentication_button.y(), authentication_button.w(), authentication_button.h());
+                        authentication_button.set_damage(true);
+
+                        fltk::app::unlock();
+                        fltk::app::awake();
                     }
 
                     if sub.changed().await.is_err() {
