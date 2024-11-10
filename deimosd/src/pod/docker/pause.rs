@@ -15,6 +15,8 @@ impl PodManager {
                     .await
                     .map_err(PausePodResult::Docker)?;
 
+                tracing::trace!("Paused container {} for {}", run.docker_id, pod.id());
+
                 lock.set(PodStateKnown::Paused(PodPaused {
                     docker_id: run.docker_id.clone(),
                 }));

@@ -131,33 +131,30 @@ impl Context {
             }
         };
 
-        let mut pods = self.pods.read().clone();
-        pods.retain(|id, _| brief.pods.iter().any(|recv| recv.id == *id));
+        self.pods.modify(|pods| {
+            for pod in brief.pods {
+                match pods.get_mut(&pod.id) {
+                    Some(exist) => {
+                        exist.data.up.set(pod.state().into());
+                        exist.data.name.set(pod.title);
+                    },
+                    None => {
+                        tracing::trace!("Received new pod {} from server", pod.id);
+                        let data = CachedPodData {
+                            up: NotifyMutation::new(CachedPodState::from(pod.state())),
+                            id: pod.id,
+                            name: NotifyMutation::new(pod.title),
+                        };
 
-        for pod in brief.pods {
-            match pods.get_mut(&pod.id) {
-                Some(exist) => {
-                    exist.data.up.set(CachedPodState::from(pod.state()));
-                    //exist.data.name = pod.title;
-                },
-                None => {
-                    tracing::trace!("Received new pod {} from server", pod.id);
-                    let data = CachedPodData {
-                        up: NotifyMutation::new(CachedPodState::from(pod.state())),
-                        id: pod.id,
-                        name: pod.title,
-                    };
+                        let pod = CachedPod {
+                            data,
+                        };
 
-                    let pod = CachedPod {
-                        data,
-                    };
-
-                    pods.insert(pod.data.id.clone(), Arc::new(pod));
+                        pods.insert(pod.data.id.clone(), Arc::new(pod));
+                    }
                 }
             }
-        }
-
-        self.pods.set(pods);
+        });
     }
 
     /// Load all context state from the local cache directory and begin connection attempts to the
@@ -212,6 +209,11 @@ impl<T> NotifyMutation<T> {
     /// Set the current value, notifying all waiting tasks of a mutation
     pub fn set(&self, val: T) {
         let _ = self.0.send_replace(val);
+    }
+    
+    /// Modify the contained value and notify waiting tasks of mutation
+    pub fn modify<F: FnOnce(&mut T)>(&self, modify: F) {
+        self.0.send_modify(modify);
     }
     
     /// Notify waiting subscribers without modifying the contained value

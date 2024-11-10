@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::{BTreeMap, HashMap}, sync::Arc};
 
 use fltk::{enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
@@ -80,30 +80,33 @@ pub fn overview(state: DeimosStateHandle) -> Group {
 
                     tokio::spawn(
                         async move {
+                            let mut buttons = BTreeMap::<String, Flex>::new();
                             let mut sub = state.ctx.pods.subscribe();
                             loop {
-                                tracing::trace!("Got pods notification {:?}", *sub.borrow());
-                                
-                                fltk::app::lock().ok();
+                                {
+                                    fltk::app::lock().ok();
 
-                                while pods_pack.children() > 0 {
-                                    let Some(child) = pods_pack.child(0) else {
-                                        continue
-                                    };
+                                    for button in buttons.values() {
+                                        pods_pack.remove(button);
+                                    }
+
+                                    let pods = sub.borrow_and_update();
+
+                                    buttons.retain(|id,_| pods.contains_key(id));
+                                    for (id, pod) in pods.clone() {
+                                        buttons
+                                            .entry(id)
+                                            .or_insert_with(|| pod_button(state.clone(), pod.clone()));
+                                    }
+
+                                    for button in buttons.values() {
+                                        pods_pack.add(button);
+                                    }
                                     
-                                    tracing::trace!("Deleting widget {}", child.label());
-                                    pods_pack.remove_by_index(0);
+                                    pods_pack.set_damage(true);
+                                    fltk::app::unlock();
+                                    fltk::app::awake();
                                 }
-
-                                for pod in sub.borrow_and_update().values() {
-                                    tracing::trace!("Adding button for {}", pod.data.name);
-                                    let button = pod_button(state.clone(), pod.clone());
-                                    pods_pack.add(&button);
-                                }
-                                
-                                pods_pack.set_damage(true);
-                                fltk::app::unlock();
-                                fltk::app::awake();
 
                                 let Ok(_) = sub.changed().await else {
                                     break
@@ -124,7 +127,7 @@ pub fn overview(state: DeimosStateHandle) -> Group {
 }
 
 /// Create a button with a brief overview of the given pod
-pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupExt {
+pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
     let mut row = Flex::new(0, 0, 0, 64, "").row();
     
     let up_state = {
@@ -134,7 +137,6 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupEx
         column.set_margins(8, 8, 0, 8);
 
         let mut title = Frame::default();
-        title.set_label(&pod.data.name);
         title.set_label_font(Font::CourierBold);
         title.set_label_color(orbit::SOL[1]);
         title.set_align(Align::Inside | Align::TopLeft);
@@ -146,6 +148,22 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupEx
         up_state.set_label_size(12);
 
         column.end();
+        
+        let pod = pod.clone();
+        tokio::task::spawn(async move {
+            let mut sub = pod.data.name.subscribe();
+            loop {
+                fltk::app::lock().ok();
+                title.set_label(&sub.borrow_and_update());
+                title.set_damage(true);
+                fltk::app::unlock();
+                fltk::app::awake();
+
+                if sub.changed().await.is_err() {
+                    break
+                }
+            }
+        });
 
         up_state
     };
@@ -159,13 +177,25 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupEx
     let load_svg = SvgImage::from_data(include_str!("../../../assets/reload.svg")).unwrap();
     let load_rgb = widget::svg::svg_color(load_svg, 128, orbit::EARTH[1]);
 
+    let pause_svg = SvgImage::from_data(include_str!("../../../assets/pause.svg")).unwrap();
+    let pause_rgb = widget::svg::svg_color(pause_svg, 128, orbit::VENUS[3]);
+
+    let mut pause_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+    pause_button.hide();
+    row.fixed(&pause_button, row.height());
+    pause_button.set_image(Some(pause_rgb));
+    pause_button.resize_callback(widget::svg::resize_image_cb(24, 24));
+
     let mut button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&button, row.height());
     button.resize_callback(widget::svg::resize_image_cb(16, 16));
 
+
     {
+        let row = row.clone();
         let mut up_state = up_state.clone();
         let mut button = button.clone();
+        let mut pause_button = pause_button.clone();
         let up = pod.data.up.clone();
         tokio::task::spawn(async move {
             let mut sub = up.subscribe();
@@ -174,26 +204,34 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupEx
                 match *sub.borrow_and_update() {
                     CachedPodState::Paused => {
                         up_state.set_label("Paused");
-                        up_state.set_label_color(orbit::MERCURY[2]);
+                        up_state.set_label_color(orbit::VENUS[3]);
                         button.set_image_scaled(Some(start_rgb.clone()));
+                        pause_button.hide();
                     }
                     CachedPodState::Disabled => {
                         up_state.set_label("Disabled");
                         up_state.set_label_color(orbit::NIGHT[0].lighter());
                         button.set_image_scaled(Some(start_rgb.clone()));
+                        pause_button.hide();
                     },
                     CachedPodState::Transit => {
                         up_state.set_label("");
+                        button.set_color(orbit::NIGHT[1]);
                         button.set_image_scaled(Some(load_rgb.clone()));
+                        pause_button.hide();
                     },
                     CachedPodState::Enabled => {
                         up_state.set_label("Enabled");
                         up_state.set_label_color(orbit::EARTH[1]);
                         button.set_image_scaled(Some(stop_rgb.clone()));
+                        pause_button.show();
                     }
                 }
             
                 button.resize(button.x(), button.y(), button.w(), button.h());
+                pause_button.resize(pause_button.x(), pause_button.y(), pause_button.w(), pause_button.h());
+                pause_button.redraw();
+                row.layout();
                 fltk::app::unlock();
                 fltk::app::awake();
 
@@ -206,6 +244,8 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupEx
     }
     
     {
+        let state = state.clone();
+        let pod = pod.clone();
         let up = pod.data.up.clone();
         button.set_callback(move |_| {
             let current = *up.read();
@@ -219,6 +259,21 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> impl GroupEx
             let pod = pod.clone();
             tokio::task::spawn(async move {
                 state.ctx.update(&pod, to).await;
+            });
+        });
+    }
+
+    {
+        let up = pod.data.up.clone();
+        pause_button.set_callback(move |_| {
+            if *up.read() != CachedPodState::Enabled {
+                return
+            }
+            
+            let state = state.clone();
+            let pod = pod.clone();
+            tokio::task::spawn(async move {
+                state.ctx.update(&pod, CachedPodState::Paused).await;
             });
         });
     }

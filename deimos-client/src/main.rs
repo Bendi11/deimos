@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use std::process::ExitCode;
 
 use tracing::level_filters::LevelFilter;

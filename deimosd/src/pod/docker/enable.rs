@@ -29,7 +29,7 @@ impl PodManager {
             PodStateKnown::Enabled(..) => return Ok(()),
             PodStateKnown::Paused(ref paused) => {
                 let leases = self.upnp.request(leases).await?;
-                self.start_container(&pod, &paused.docker_id).await?;
+                self.resume_container(&pod, &paused.docker_id).await?;
                 (leases, paused.docker_id.clone())
             },
             PodStateKnown::Disabled => {
@@ -90,6 +90,15 @@ impl PodManager {
                 container,
                 Option::<bollard::container::StartContainerOptions<&'static str>>::None,
             )
+            .await
+            .map_err(PodEnableError::StartContainer)
+    }
+
+    async fn resume_container(&self, pod: &Pod, container: &DockerId) -> Result<(), PodEnableError> {
+        tracing::trace!("Resuming paused container {} for {}", container, pod.id());
+
+        self.docker
+            .unpause_container(container)
             .await
             .map_err(PodEnableError::StartContainer)
     }

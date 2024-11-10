@@ -9,35 +9,37 @@ pub fn button(color: Color, hovered: Color) -> Button {
     button.set_selection_color(color);
     button.set_color(color);
     button.clear_visible_focus();
-    button.handle(
-        move |b, ev| match ev {
-            Event::Hide => {
-                b.set_color(color);
-                false
-            },
-            Event::Enter => {
-                b.set_color(hovered);
-                b.redraw();
-                true
-            },
-            Event::Leave => {
-                b.set_color(color);
-                b.redraw();
-                true
-            },
-            Event::Push => {
-                b.set_color(color);
-                b.redraw();
-                true
-            },
-            Event::Released => {
-                b.set_color(hovered);
-                b.redraw();
-                true
-            },
-            _ => false,
-        }
-    );
+    button.handle(hover_handler(color, hovered));
 
     button
+}
+
+fn hover_handler(color: Color, hovered: Color) -> impl FnMut(&mut Button, Event) -> bool + 'static {
+    move |b, ev| match ev {
+        Event::Hide => {
+            b.set_color(color);
+            false
+        },
+        Event::Enter => {
+            b.set_color(hovered);
+            b.redraw();
+            true
+        },
+        Event::Leave => {
+            b.set_color(color);
+            b.redraw();
+            true
+        },
+        Event::Push => {
+            b.set_color(color);
+            b.redraw();
+            true
+        },
+        Event::Released => {
+            b.set_color(hovered);
+            b.redraw();
+            true
+        },
+        _ => false,
+    }
 }

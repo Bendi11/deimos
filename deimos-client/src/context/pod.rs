@@ -15,11 +15,11 @@ pub struct CachedPod {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CachedPodData {
     pub id: String,
-    pub name: String,
+    pub name: NotifyMutation<String>,
     pub up: NotifyMutation<CachedPodState>,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CachedPodState {
     Disabled,
     Transit,

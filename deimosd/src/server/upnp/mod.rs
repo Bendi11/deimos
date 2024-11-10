@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use std::time::Duration;
 
-use dashmap::DashMap;
 use igd_next::aio::tokio::Tokio;
 use igd_next::aio::Gateway;
 use igd_next::PortMappingProtocol;
@@ -19,11 +18,9 @@ pub struct Upnp {
     conf: UpnpConfig,
     /// Transmitter sending new UPnP leases to the maintainer thread
     /// when they are accquired
-    tx: tokio::sync::mpsc::Sender<u16>,
+    tx: tokio::sync::mpsc::Sender<UpnpMessage>,
     /// Local IP address, accquired from the local network interface
     local_ip: IpAddr,
-    /// Map of all active UPnP leases
-    leases: UpnpLeases,
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -34,13 +31,13 @@ pub struct UpnpConfig {
     pub remove_immediate: bool,
 }
 
-pub type UpnpReceiver = tokio::sync::mpsc::Receiver<u16>;
-
-/// A reference to a mapping of active UPnP leases
-#[derive(Clone, Default)]
-struct UpnpLeases {
-    map: Arc<DashMap<u16, UpnpLeaseData>>,
+pub enum UpnpMessage {
+    Add(UpnpLeaseData),
+    Remove(u16)
 }
+
+pub type UpnpReceiver = tokio::sync::mpsc::Receiver<UpnpMessage>;
+pub type UpnpSender = tokio::sync::mpsc::Sender<UpnpMessage>;
 
 /// Data required to create a UPnP lease
 #[derive(Debug, Clone)]
@@ -50,11 +47,18 @@ pub struct UpnpLeaseData {
     pub port: u16,
 }
 
+/// Tracking for the number of tasks that have requested the given port remain forwarded
+#[derive(Debug)]
+pub struct LeaseTrack {
+    pub data: UpnpLeaseData,
+    pub rc: usize,
+}
+
 /// Type representing a group of network ports mapped with UPNP to the device - maintains the lease
 /// on a set interval and stops renewal when dropped
 #[derive(Clone)]
 pub struct UpnpLease {
-    leases: UpnpLeases,
+    tx: UpnpSender,
     ports: Arc<[u16]>,
 }
 
@@ -77,13 +81,11 @@ impl Upnp {
     /// ports
     pub async fn new(conf: UpnpConfig) -> Result<(Self, UpnpReceiver), UpnpInitError> {
         let local_ip = local_ip_address::local_ip()?;
-        let leases = UpnpLeases::default();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
 
         Ok((
             Self {
                 local_ip,
-                leases,
                 tx,
                 conf,
             },
@@ -110,22 +112,60 @@ impl Upnp {
         renewal_interval.tick().await;
         renewal_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        let mut bound = HashMap::<u16, LeaseTrack>::new();
+
         loop {
-            tokio::select! {
+            let msg = tokio::select! {
                 _ = renewal_interval.tick() => {
-                    for entry in self.leases.map.iter() {
-                        self.accquire(&gateway, entry.value()).await;
+                    for entry in bound.values() {
+                        self.accquire(&gateway, &entry.data).await;
+                    }
+
+                    continue
+                },
+                Some(msg) = rx.recv() => msg,
+            };
+
+            match msg {
+                UpnpMessage::Add(data) => match bound.get_mut(&data.port) {
+                    Some(exist) => {
+                        exist.rc += 1;
+                    },
+                    None => {
+                        let port = data.port;
+                        let track = LeaseTrack {
+                            rc: 1,
+                            data,
+                        };
+                        
+                        self.accquire(&gateway, &track.data).await;
+                        bound.insert(port, track);
                     }
                 },
-                Some(new) = rx.recv() => {
-                    match self.leases.map.get(&new) {
-                        Some(ref lease) => self.accquire(&gateway, lease).await,
-                        None => {
-                            tracing::warn!("Notified of new UPnP lease that does not yet have a mapping");
+                UpnpMessage::Remove(port) => match bound.get_mut(&port) {
+                    Some(entry) => {
+                        entry.rc -= 1;
+                        if entry.rc == 0 {
+                            self.remove(&gateway, &entry.data).await;
+                            bound.remove(&port);
                         }
+                    },
+                    None => {
+                        tracing::warn!("Got UPnP remove port message for untracked port {}", port);
                     }
                 }
-            };
+            }
+        }
+    }
+
+    async fn remove(&self, gateway: &Gateway<Tokio>, data: &UpnpLeaseData) {
+        match gateway.remove_port(data.protocol, data.port).await {
+            Ok(_) => {
+                tracing::trace!("Removed UPnP lease {} for port {}", data.name, data.port);
+            },
+            Err(e) => {
+                tracing::error!("Failed to remove UPnP lease for port {}: {}", data.port, e);
+            }
         }
     }
 
@@ -166,52 +206,17 @@ impl Upnp {
         &self,
         leases: Vec<UpnpLeaseData>,
     ) -> Result<UpnpLease, UpnpError> {
-        let lease = self.leases.add(leases).await?;
-        for port in lease.ports.iter() {
-            if let Err(e) = self.tx.send(*port).await {
+        let mut ports = Vec::with_capacity(leases.len());
+
+        for data in leases {
+            let port = data.port;
+            ports.push(port);
+            if let Err(e) = self.tx.send(UpnpMessage::Add(data)).await {
                 tracing::error!("Failed to send UPnP port update notification to UPnP maintainer: {}", e);
             }
         }
 
-        Ok(lease)
-    }
-}
-
-impl UpnpLeases {
-    /// Request a new collection of ports to be forwarded
-    pub async fn add(
-        &self,
-        ports: impl IntoIterator<Item = UpnpLeaseData>,
-    ) -> Result<UpnpLease, UpnpError> {
-        let lease_data = ports.into_iter().collect::<Vec<_>>();
-
-        for data in lease_data.iter() {
-            if self.map.contains_key(&data.port) {
-                return Err(UpnpError::InUse(data.port));
-            }
-        }
-
-        let ports = lease_data
-            .iter()
-            .map(|data| data.port)
-            .collect::<Arc<[_]>>();
-        for (port, data) in lease_data.into_iter().map(|data| (data.port, data)) {
-            self.map.insert(port, data);
-        }
-
-        Ok(UpnpLease {
-            leases: self.clone(),
-            ports,
-        })
-    }
-
-    /// Drop the given forwarded ports from the map.
-    /// This function can be called from both async and non-async contexts - so `Drop`
-    /// implementations can use it safely.
-    pub fn drop(&self, ports: impl IntoIterator<Item = u16>) {
-        for port in ports {
-            self.map.remove(&port);
-        }
+        Ok(UpnpLease { tx: self.tx.clone(), ports: Arc::from(ports) })
     }
 }
 
@@ -246,8 +251,16 @@ pub enum UpnpError {
 
 impl Drop for UpnpLease {
     fn drop(&mut self) {
-        if let Some(ref ports) = Arc::get_mut(&mut self.ports) {
-            self.leases.drop(ports.iter().copied())
+        if let Some(ports) = Arc::get_mut(&mut self.ports) {
+            let ports = Vec::from(ports);
+            let tx = self.tx.clone();
+            tokio::task::spawn(async move {
+                for port in ports {
+                    if let Err(e) = tx.send(UpnpMessage::Remove(port)).await {
+                        tracing::error!("Failed to send port removal message to UPnP task: {}", e);
+                    }
+                }
+            });
         }
     }
 }

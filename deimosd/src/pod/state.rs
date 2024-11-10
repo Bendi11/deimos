@@ -180,7 +180,7 @@ impl<'a> PodStateWriteHandle<'a> {
 impl Drop for PodStateWriteHandle<'_> {
     fn drop(&mut self) {
         if *self.tx.borrow() == PodState::Transit {
-            self.tx.send_modify(|_| ());
+            let _ = self.tx.send(PodState::from(&*self.lock));
         }
     }
 }
