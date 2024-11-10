@@ -40,7 +40,7 @@ pub fn protect(buf: &[u8]) -> Result<Vec<u8>, DpapiError> {
 
 pub fn unprotect(buf: &[u8])  -> Result<Vec<u8>, DpapiError> {
     let blob = CRYPT_INTEGER_BLOB {
-        cbData: buf.len() as u8,
+        cbData: buf.len() as u32,
         pbData: unsafe { buf.as_ptr() as *mut u8 },
     };
 
