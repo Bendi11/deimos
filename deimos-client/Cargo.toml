@@ -3,6 +3,7 @@ repository = "https://github.com/bendi11/deimos.git"
 name = "deimos-client"
 description = "Client for the Deimos container manager"
 authors = ["bkliebmann@gmail.com"]
+
 version = "1.0.0"
 edition = "2021"
 
