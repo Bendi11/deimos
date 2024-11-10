@@ -1,6 +1,6 @@
 use windows_core::w;
 use windows::Win32::{
-    Foundation::{LocalFree, HWND},
+    Foundation::{LocalFree, HWND, HLOCAL},
     Security::Cryptography::{
         self, CryptProtectData, CryptUnprotectData, CRYPTPROTECT_PROMPTSTRUCT, CRYPTPROTECT_PROMPT_ON_UNPROTECT, CRYPT_INTEGER_BLOB
     }
@@ -33,7 +33,7 @@ pub fn protect(buf: &[u8]) -> Result<Vec<u8>, DpapiError> {
         let mut vec = Vec::with_capacity(slice.len());
         vec.copy_from_slice(slice);
 
-        LocalFree(encrypt.pbData);
+        LocalFree(HLOCAL(encrypt.pbData as *mut std::ffi::c_void));
         vec
     })
 }
@@ -64,7 +64,7 @@ pub fn unprotect(buf: &[u8])  -> Result<Vec<u8>, DpapiError> {
         let mut vec = Vec::with_capacity(slice.len());
         vec.copy_from_slice(slice);
         
-        LocalFree(unprotect.pbData);
+        LocalFree(HLOCAL(unprotect.pbData as *mut std::ffi::c_void));
         vec
     })
 }

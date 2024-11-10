@@ -124,7 +124,7 @@ impl PersistentToken {
             data: match kind {
                 PersistentTokenKind::Plaintext => data,
                 #[cfg(windows)]
-                PersistentTokenKind::Dpapi => data.try_map(|data| auth::dpapi::protect(data).map_err(|e| e.to_string()))?,
+                PersistentTokenKind::Dpapi => data.try_map(|data| dpapi::protect(data).map_err(|e| e.to_string()))?,
             },
             kind,
         })
@@ -135,7 +135,7 @@ impl PersistentToken {
         match self.kind {
             PersistentTokenKind::Plaintext => Ok(self.data.clone()),
             #[cfg(windows)]
-            PersistentTokenKind::Dpapi => self.data.try_map(|data| auth::dpapi::unprotect(data).map_err(|e| e.to_string())),
+            PersistentTokenKind::Dpapi => self.data.try_map(|data| dpapi::unprotect(data).map_err(|e| e.to_string())),
         }
     }
 }

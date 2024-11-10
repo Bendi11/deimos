@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use fltk::{enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
@@ -78,6 +78,8 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                         }
                     );
 
+                    pods_pack.end();
+
                     tokio::spawn(
                         async move {
                             let mut buttons = BTreeMap::<String, Flex>::new();
@@ -99,10 +101,11 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                                             .or_insert_with(|| pod_button(state.clone(), pod.clone()));
                                     }
 
-                                    for button in buttons.values() {
+                                    for button in buttons.values_mut() {
                                         pods_pack.add(button);
                                     }
                                     
+
                                     pods_pack.set_damage(true);
                                     fltk::app::unlock();
                                     fltk::app::awake();
@@ -128,6 +131,7 @@ pub fn overview(state: DeimosStateHandle) -> Group {
 
 /// Create a button with a brief overview of the given pod
 pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
+    tracing::trace!("Adding button for {}", pod.data.id);
     let mut row = Flex::new(0, 0, 0, 64, "").row();
     
     let up_state = {
@@ -154,6 +158,7 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
             let mut sub = pod.data.name.subscribe();
             loop {
                 fltk::app::lock().ok();
+                tracing::trace!("Button is at {}, {}", title.x(), title.y());
                 title.set_label(&sub.borrow_and_update());
                 title.set_damage(true);
                 fltk::app::unlock();
