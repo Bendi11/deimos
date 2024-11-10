@@ -3,7 +3,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use fltk::{button::Button, group::{Group, Pack, PackType}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
-use crate::context::client::{auth::PersistentTokenKind, ContextSettings};
+use crate::context::client::ContextSettings;
 
 use super::{orbit, widget::{self, input::input_box}, DeimosStateHandle};
 
@@ -21,8 +21,7 @@ pub fn settings(state: DeimosStateHandle) -> Group {
     let save_img = widget::svg::svg_color(save, 42, orbit::SOL[1]);
     let mut save_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     save_button.set_size(42, 42);
-    save_button.set_image_scaled(Some(save_img));
-    save_button.resize_callback(widget::svg::resize_image_cb(0, 0));
+    save_button.set_image(Some(save_img));
 
     let (frame, mut host_url) = input_box::<Input>("Host URL");
     frame.center_of_parent().with_size(top.width() - 16, 60);

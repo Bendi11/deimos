@@ -4,20 +4,20 @@ use crate::{app::{orbit, widget, DeimosStateHandle}, context::client::ContextCon
 
 
 pub fn header(state: DeimosStateHandle) -> impl GroupExt {
-    let mut row = Flex::default_fill()
+    let mut row = Flex::default()
+        .with_size(0, 64)
         .row()
         .with_align(Align::Center);
     row.set_margins(8, 0, 0, 8);
 
     let deimos_icon = SvgImage::from_data(include_str!("../../../assets/mars-deimos.svg"))
         .unwrap();
-    let deimos_rgb = widget::svg::svg_color(deimos_icon, 128, orbit::MARS[2]);
+    let deimos_rgb = widget::svg::svg_color(deimos_icon, 64, orbit::MARS[2]);
     let mut frame = Frame::default().with_size(64, 64);
-    frame.resize_callback(widget::svg::resize_image_cb(0, 0));
     frame.set_image(Some(deimos_rgb));
     
     {
-        let mut title_col = Flex::default_fill().column();
+        let mut title_col = Flex::default().column();
         let mut title_frame = Frame::default()
             .with_label("Deimos");
         title_frame.set_label_color(orbit::SOL[0]);
@@ -73,12 +73,12 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
 
         title_col.end();
     }
-
+    
+    let icon_size = row.height() - 16;
     let authentication_icon = SvgImage::from_data(include_str!("../../../assets/key.svg")).unwrap();
-    let authentication_grey = widget::svg::svg_color(authentication_icon.clone(), 128, orbit::MERCURY[2]);
-    let authentication_red  = widget::svg::svg_color(authentication_icon, 128, orbit::MARS[2]);
+    let authentication_grey = widget::svg::svg_color(authentication_icon.clone(), icon_size, orbit::MERCURY[2]);
+    let authentication_red  = widget::svg::svg_color(authentication_icon, icon_size, orbit::MARS[2]);
     let mut authentication_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
-    authentication_button.resize_callback(widget::svg::resize_image_cb(0, 0));
     {
         let state = state.clone();
         authentication_button.set_callback(move |_| {
@@ -106,12 +106,6 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
                                 if token.token().is_some() { authentication_grey.clone() } else { authentication_red.clone() }
                             )
                         );
-                        authentication_button.resize(
-                            authentication_button.x(),
-                            authentication_button.y(),
-                            authentication_button.w(),
-                            authentication_button.h()
-                        );
                         authentication_button.set_damage(true);
 
                         fltk::app::unlock();
@@ -127,7 +121,7 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
     }
 
     let settings_icon = SvgImage::from_data(include_str!("../../../assets/settings.svg")).unwrap();
-    let settings_rgb = widget::svg::svg_color(settings_icon, 128, orbit::MERCURY[2]);
+    let settings_rgb = widget::svg::svg_color(settings_icon, row.height() - 16, orbit::MERCURY[2]);
     let mut settings_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     settings_button.set_image(Some(settings_rgb));
     settings_button.set_callback(move |_| {
@@ -138,7 +132,6 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
             }
         );
     });
-    settings_button.resize_callback(widget::svg::resize_image_cb(0, 0));
 
     row.fixed(&settings_button, row.height());
     row.resize_callback(move |r,_,_,_,_| {

@@ -115,6 +115,7 @@ impl Context {
                 tracing::trace!("Successfully updated pod {} state to {:?}", pod.data.id, up);
             },
             Err(e) => {
+                pod.data.up.notify();
                 tracing::warn!("Failed to update pod {} state: {}", pod.data.id, e);
             }
         }

@@ -33,12 +33,11 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                 label.set_align(Align::Inside | Align::Left);
                 
                 let reload_svg = SvgImage::from_data(include_str!("../../../assets/reload.svg")).unwrap();
-                let reload_rgb = widget::svg::svg_color(reload_svg, 128, orbit::MERCURY[2]);
+                let reload_rgb = widget::svg::svg_color(reload_svg, servers_container.height(), orbit::MERCURY[2]);
                 let mut reload_button = widget::button::button::<Button>(orbit::NIGHT[2], orbit::NIGHT[0]);
                 servers_container.fixed(&reload_button, servers_container.height());
                 reload_button.set_image(Some(reload_rgb));
                 reload_button.set_align(Align::Center);
-                reload_button.resize_callback(widget::svg::resize_image_cb(0, 0));
                 
                 {
                     let state = state.clone();
@@ -65,7 +64,7 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                     scroll.set_align(Align::Center | Align::Inside);
                     
                     let mut pods_pack = Pack::default_fill();
-                    pods_pack.set_spacing(32);
+                    pods_pack.set_spacing(16);
                     pods_pack.set_frame(FrameType::NoBox);
                     pods_pack.set_color(orbit::SOL[0]);
                     pods_pack.set_type(PackType::Vertical);
@@ -131,7 +130,6 @@ pub fn overview(state: DeimosStateHandle) -> Group {
 
 /// Create a button with a brief overview of the given pod
 pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
-    tracing::trace!("Adding button for {}", pod.data.id);
     let mut row = Flex::new(0, 0, 0, 64, "").row();
     
     let up_state = {
@@ -158,7 +156,6 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
             let mut sub = pod.data.name.subscribe();
             loop {
                 fltk::app::lock().ok();
-                tracing::trace!("Button is at {}, {}", title.x(), title.y());
                 title.set_label(&sub.borrow_and_update());
                 title.set_damage(true);
                 fltk::app::unlock();
@@ -172,36 +169,39 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
 
         up_state
     };
+
+    let dim = row.height() - 16;
     
     let start_svg = SvgImage::from_data(include_str!("../../../assets/start.svg")).unwrap();
-    let start_rgb = widget::svg::svg_color(start_svg, 128, orbit::MERCURY[1]);
+    let start_rgb = widget::svg::svg_color(start_svg, dim, orbit::MERCURY[1]);
     
     let stop_svg = SvgImage::from_data(include_str!("../../../assets/stop.svg")).unwrap();
-    let stop_rgb = widget::svg::svg_color(stop_svg, 128, orbit::MARS[2]);
+    let stop_rgb = widget::svg::svg_color(stop_svg, dim, orbit::MARS[2]);
 
     let load_svg = SvgImage::from_data(include_str!("../../../assets/reload.svg")).unwrap();
-    let load_rgb = widget::svg::svg_color(load_svg, 128, orbit::EARTH[1]);
+    let load_rgb = widget::svg::svg_color(load_svg, dim, orbit::EARTH[1]);
 
     let pause_svg = SvgImage::from_data(include_str!("../../../assets/pause.svg")).unwrap();
-    let pause_rgb = widget::svg::svg_color(pause_svg, 128, orbit::VENUS[3]);
+    let pause_rgb = widget::svg::svg_color(pause_svg, dim - 16, orbit::VENUS[3]);
 
     let mut pause_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     pause_button.hide();
     row.fixed(&pause_button, row.height());
     pause_button.set_image(Some(pause_rgb));
-    pause_button.resize_callback(widget::svg::resize_image_cb(24, 24));
+    //pause_button.resize_callback(widget::svg::resize_image_cb(24, 24));
 
     let mut button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&button, row.height());
-    button.resize_callback(widget::svg::resize_image_cb(16, 16));
+    //button.resize_callback(widget::svg::resize_image_cb(16, 16));
 
 
     {
-        let row = row.clone();
+        let mut row = row.clone();
         let mut up_state = up_state.clone();
         let mut button = button.clone();
         let mut pause_button = pause_button.clone();
         let up = pod.data.up.clone();
+        let load_rgb = load_rgb.clone();
         tokio::task::spawn(async move {
             let mut sub = up.subscribe();
             loop {
@@ -210,38 +210,35 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
                     CachedPodState::Paused => {
                         up_state.set_label("Paused");
                         up_state.set_label_color(orbit::VENUS[3]);
-                        button.set_image_scaled(Some(start_rgb.clone()));
+                        button.set_image(Some(start_rgb.clone()));
                         pause_button.hide();
                     }
                     CachedPodState::Disabled => {
                         up_state.set_label("Disabled");
                         up_state.set_label_color(orbit::NIGHT[0].lighter());
-                        button.set_image_scaled(Some(start_rgb.clone()));
+                        button.set_image(Some(start_rgb.clone()));
                         pause_button.hide();
                     },
                     CachedPodState::Transit => {
                         up_state.set_label("");
                         button.set_color(orbit::NIGHT[1]);
-                        button.set_image_scaled(Some(load_rgb.clone()));
+                        button.set_image(Some(load_rgb.clone()));
                         pause_button.hide();
                     },
                     CachedPodState::Enabled => {
                         up_state.set_label("Enabled");
                         up_state.set_label_color(orbit::EARTH[1]);
-                        button.set_image_scaled(Some(stop_rgb.clone()));
+                        button.set_image(Some(stop_rgb.clone()));
                         pause_button.show();
                     }
                 }
-            
-                button.resize(button.x(), button.y(), button.w(), button.h());
-                pause_button.resize(pause_button.x(), pause_button.y(), pause_button.w(), pause_button.h());
-                pause_button.redraw();
+                
                 row.layout();
+                row.redraw();
                 fltk::app::unlock();
                 fltk::app::awake();
 
                 let Ok(_) = sub.changed().await else {
-                    tracing::trace!("Pod status notifier dropped");
                     break;
                 };
             }
@@ -252,13 +249,18 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
         let state = state.clone();
         let pod = pod.clone();
         let up = pod.data.up.clone();
-        button.set_callback(move |_| {
+        button.set_callback(move |b| {
             let current = *up.read();
             let to = match current {
                 CachedPodState::Disabled | CachedPodState::Paused => CachedPodState::Enabled,
                 CachedPodState::Transit => return,
                 CachedPodState::Enabled => CachedPodState::Disabled,
             };
+            
+            fltk::app::lock().ok();
+            b.set_image(Some(load_rgb.clone()));
+            fltk::app::unlock();
+            fltk::app::awake();
             
             let state = state.clone();
             let pod = pod.clone();

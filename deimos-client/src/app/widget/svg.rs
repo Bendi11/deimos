@@ -1,19 +1,10 @@
-use fltk::{enums::Color, image::{RgbImage, SvgImage}, prelude::{ImageExt, WidgetBase}};
+use fltk::{enums::Color, image::{RgbImage, SvgImage}, prelude::ImageExt};
 
 
 pub fn svg_color(img: SvgImage, sz: i32, color: Color) -> RgbImage {
     let mut img = img.copy_sized(sz, sz);
     img.normalize();
     convert_color(img, color)
-}
-
-pub fn resize_image_cb<T: WidgetBase>(mx: i32, my: i32) -> impl FnMut(&mut T, i32, i32, i32, i32) {
-    move |w: &mut T, _, _, _, _| {
-        if let Some(mut image) = w.image() {
-            image.scale(w.height() - mx, w.height() - my, true, true);
-            w.redraw();
-        }
-    }
 }
 
 fn convert_color(mut img: SvgImage, color: Color) -> RgbImage {

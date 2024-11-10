@@ -76,6 +76,7 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
                     }
                 }
 
+                dpapi_button.set_damage(true);
                 protection_status.set_damage(true);
                 fltk::app::unlock();
                 fltk::app::awake();
@@ -92,7 +93,7 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
     
     top.fixed(&label("Token Request"), 40);
     let request = request_group(state.clone());
-    top.fixed(&request, 160);
+    top.fixed(&request, 140);
 
     top.end();
     top.as_group().unwrap()
@@ -102,8 +103,7 @@ fn label(lbl: &str) -> Frame {
     let mut frame = Frame::default();
     frame.set_label(lbl);
     frame.set_label_size(24);
-    frame.set_label_font(Font::CourierBold);
-    frame.set_label_color(orbit::SOL[0]);
+    frame.set_label_color(orbit::MERCURY[0]);
     frame.set_align(Align::Inside | Align::Left);
     frame
 }
@@ -111,7 +111,7 @@ fn label(lbl: &str) -> Frame {
 fn request_group(state: DeimosStateHandle) -> Pack {
     let pack = Pack::default_fill();
 
-    let (mut frame, mut username) = widget::input::input_box::<Input>("Requested Token Username");
+    let (mut frame, mut username) = widget::input::input_box::<Input>("Username");
     frame.set_size(pack.width(), 40);
     match hostname::get() {
         Ok(hostname) => match hostname.to_str() {
@@ -130,6 +130,8 @@ fn request_group(state: DeimosStateHandle) -> Pack {
     let mut request_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     request_button.set_size(pack.width(), 40);
     request_button.set_label("Submit Token Request");
+    request_button.set_label_font(Font::Screen);
+    request_button.set_label_size(18);
     request_button.set_label_color(orbit::MERCURY[0]);
 
     let mut status = Frame::default();
@@ -265,16 +267,16 @@ fn token_box_field(name: &'static str) -> Frame {
 }
 
 fn header(state: DeimosStateHandle) -> Flex {
-    let mut row = Flex::default_fill()
-            .row()
-            .with_align(Align::Center);
+    let mut row = Flex::default()
+        .with_size(0, 42)
+        .row()
+        .with_align(Align::Center);
 
     let back_svg = SvgImage::from_data(include_str!("../../../assets/close.svg")).unwrap();
-    let back_rgb = widget::svg::svg_color(back_svg, 128, orbit::MERCURY[1]);
+    let back_rgb = widget::svg::svg_color(back_svg, row.height() - 16, orbit::MERCURY[1]);
     let mut back_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&back_button, row.height());
     back_button.set_image(Some(back_rgb));
-    back_button.resize_callback(widget::svg::resize_image_cb(0, 0));
     back_button.set_callback(move |_| {
         let state = state.clone();
         tokio::task::spawn(async move {
