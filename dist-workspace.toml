@@ -17,3 +17,14 @@ install-path = "$HOME/.local/bin"
 install-updater = false
 
 github-build-setup = "build-install-protoc.yml"
+
+[dist.dependencies.apt]
+libx11-dev = '*'
+libxext-dev = '*'
+libxft-dev = '*'
+libxinerama-dev = '*'
+libxcursor-dev = '*'
+libxrender-dev = '*'
+libxfixes-dev = '*'
+libgl1-mesa-dev = '*'
+libglu1-mesa-dev = '*'

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use api::{ApiConfig, ApiInitError, ApiState};
+#[cfg(unix)]
 use tokio::signal::unix::SignalKind;
 use tokio_util::sync::CancellationToken;
 use upnp::{Upnp, UpnpConfig};
