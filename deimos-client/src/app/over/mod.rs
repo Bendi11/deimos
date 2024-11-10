@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use fltk::{enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
+use fltk::{button::Button, enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
 use crate::context::pod::{CachedPod, CachedPodState};
 
@@ -34,7 +34,7 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                 
                 let reload_svg = SvgImage::from_data(include_str!("../../../assets/reload.svg")).unwrap();
                 let reload_rgb = widget::svg::svg_color(reload_svg, 128, orbit::MERCURY[2]);
-                let mut reload_button = widget::button::button(orbit::NIGHT[2], orbit::NIGHT[0]);
+                let mut reload_button = widget::button::button::<Button>(orbit::NIGHT[2], orbit::NIGHT[0]);
                 servers_container.fixed(&reload_button, servers_container.height());
                 reload_button.set_image(Some(reload_rgb));
                 reload_button.set_align(Align::Center);
@@ -185,13 +185,13 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
     let pause_svg = SvgImage::from_data(include_str!("../../../assets/pause.svg")).unwrap();
     let pause_rgb = widget::svg::svg_color(pause_svg, 128, orbit::VENUS[3]);
 
-    let mut pause_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut pause_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     pause_button.hide();
     row.fixed(&pause_button, row.height());
     pause_button.set_image(Some(pause_rgb));
     pause_button.resize_callback(widget::svg::resize_image_cb(24, 24));
 
-    let mut button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&button, row.height());
     button.resize_callback(widget::svg::resize_image_cb(16, 16));
 

@@ -147,3 +147,13 @@ impl Drop for TokenStatus {
         }
     }
 }
+
+impl Default for PersistentTokenKind {
+    fn default() -> Self {
+        #[cfg(windows)]
+        { Self::Dpapi }
+
+        #[cfg(not(windows))]
+        { Self::Plaintext }
+    }
+}

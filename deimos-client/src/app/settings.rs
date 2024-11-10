@@ -1,6 +1,6 @@
-use std::{str::FromStr, time::Duration};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
-use fltk::{group::{Group, Pack, PackType}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{button::Button, group::{Group, Pack, PackType}, image::SvgImage, input::{Input, IntInput}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 use http::Uri;
 
 use crate::context::client::{auth::PersistentTokenKind, ContextSettings};
@@ -19,12 +19,10 @@ pub fn settings(state: DeimosStateHandle) -> Group {
     
     let save = SvgImage::from_data(include_str!("../../assets/check.svg")).unwrap();
     let save_img = widget::svg::svg_color(save, 42, orbit::SOL[1]);
-    let mut save_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut save_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     save_button.set_size(42, 42);
     save_button.set_image_scaled(Some(save_img));
     save_button.resize_callback(widget::svg::resize_image_cb(0, 0));
-   
-
 
     let (frame, mut host_url) = input_box::<Input>("Host URL");
     frame.center_of_parent().with_size(top.width() - 16, 60);
@@ -97,7 +95,6 @@ pub fn settings(state: DeimosStateHandle) -> Group {
             server_uri,
             request_timeout,
             connect_timeout,
-            token_protect: PersistentTokenKind::Plaintext,
         };
 
         tracing::trace!("Got new settings {:?}", settings);

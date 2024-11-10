@@ -35,6 +35,7 @@ pub struct ContextClients {
     pub conn: NotifyMutation<ContextConnectionState>,
     /// Settings to be 
     pub settings: NotifyMutation<ContextSettings>,
+    pub token_protect: NotifyMutation<PersistentTokenKind>,
     pub token: NotifyMutation<TokenStatus>,
     /// Notifier semaphore used to stop ongoing API requests when reloading settings or token
     cancel: Arc<Notify>,
@@ -61,6 +62,8 @@ pub enum ContextConnectionState {
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ContextPersistent {
     pub settings: ContextSettings,
+
+    pub token_protect: PersistentTokenKind,
     #[serde(default)]
     pub token: Option<PersistentToken>,
 }
@@ -72,7 +75,6 @@ pub struct ContextSettings {
     pub server_uri: Uri,
     pub request_timeout: Duration,
     pub connect_timeout: Duration,
-    pub token_protect: PersistentTokenKind,
 }
 
 impl ContextClients {
@@ -88,7 +90,8 @@ impl ContextClients {
                 None
             }
         });
-
+        
+        let token_protect = NotifyMutation::new(persistent.token_protect);
         let token = TokenStatus::from_token(token);
         let settings = NotifyMutation::new(persistent.settings);
         let token = NotifyMutation::new(token);
@@ -96,6 +99,7 @@ impl ContextClients {
         let this = Self {
             conn,
             settings,
+            token_protect,
             token,
             cancel,
             clients,
@@ -221,6 +225,7 @@ impl ContextClients {
     
     /// Get a copy of the current state that can be serialized to a save file
     pub fn persistent(&self) -> ContextPersistent {
+        let token_protect = *self.token_protect.read();
         let settings = self.settings.read().clone();
 
         let token = self
@@ -228,7 +233,7 @@ impl ContextClients {
             .read()
             .token()
             .cloned()
-            .and_then(|tok| match PersistentToken::protect(settings.token_protect, tok) {
+            .and_then(|tok| match PersistentToken::protect(*self.token_protect.read(), tok) {
             Ok(tok) => Some(tok),
             Err(e) => {
                 tracing::error!("Failed to protect persistent token: {}", e);
@@ -238,6 +243,7 @@ impl ContextClients {
 
         ContextPersistent {
             settings,
+            token_protect,
             token,
         }
     }
@@ -249,7 +255,6 @@ impl Default for ContextSettings {
             server_uri: Uri::default(),
             request_timeout: Duration::from_secs(30),
             connect_timeout: Duration::from_secs(60),
-            token_protect: PersistentTokenKind::Plaintext,
         }
     }
 }

@@ -1,8 +1,8 @@
-use fltk::{enums::{Align, CallbackTrigger, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::Input, prelude::*};
+use fltk::{button::Button, enums::{Align, CallbackTrigger, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::Input, prelude::*};
 
-use crate::context::client::auth::TokenStatus;
+use crate::context::client::auth::{PersistentTokenKind, TokenStatus};
 
-use super::{orbit, widget, DeimosStateHandle};
+use super::{orbit, widget::{self}, DeimosStateHandle};
 
 
 
@@ -10,35 +10,102 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
     let mut top = Flex::default_fill().column();
     top.set_margins(8, 8, 8, 8);
     top.set_color(orbit::NIGHT[2]);
+    top.set_spacing(8);
     top.hide();
 
     let header = header(state.clone());
     top.fixed(&header, 42);
 
-    let mut current_title = Frame::default();
-    top.fixed(&current_title, 40);
-    current_title.set_label("Current Token");
-    current_title.set_label_size(24);
-    current_title.set_label_font(Font::CourierBold);
-    current_title.set_label_color(orbit::MERCURY[1]);
-    current_title.set_align(Align::Inside | Align::Left);
-    token_box(state.clone()).with_size(top.width(), 140);
+    
+    top.fixed(&label("Current Token"), 40);
+    top.fixed(&token_box(state.clone()), 140);
 
     Frame::default_fill();
 
-    let mut reqtitle = Frame::default();
-    top.fixed(&reqtitle, 40);
-    reqtitle.set_label("Token Request");
-    reqtitle.set_label_size(24);
-    reqtitle.set_label_font(Font::CourierBold);
-    reqtitle.set_label_color(orbit::MERCURY[1]);
-    reqtitle.set_align(Align::Inside | Align::Left);
 
+    top.fixed(&label("Token Protection"), 40);
+    let mut protection_status = Frame::default();
+    top.fixed(&protection_status, 20);
+    protection_status.set_label_font(Font::Screen);
+    protection_status.set_label_size(16);
+    protection_status.set_align(Align::Center | Align::Inside);
+
+    let mut dpapi_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    dpapi_button.set_label_font(Font::Screen);
+    dpapi_button.set_label_size(18);
+    dpapi_button.set_label_color(orbit::MERCURY[0]);
+    top.fixed(&dpapi_button, 40);
+
+    {
+        let state = state.clone();
+        dpapi_button.set_callback(move |_| {
+            let token_protect = state.ctx.clients.token_protect.clone();
+            let current = *token_protect.read();
+            token_protect.set(
+                match current {
+                    #[cfg(not(windows))]
+                    PersistentTokenKind::Plaintext => PersistentTokenKind::Plaintext,
+                    #[cfg(windows)]
+                    PersistentTokenKind::Plaintext => PersistentTokenKind::Dpapi,
+                    #[cfg(windows)]
+                    PersistentTokenKind::Dpapi => PersistentTokenKind::Plaintext,
+                }
+            );
+        });
+    }
+
+    {
+        let state = state.clone();
+        tokio::task::spawn(async move {
+            let mut sub = state.ctx.clients.token_protect.subscribe();
+            loop {
+                let protect = *sub.borrow_and_update();
+
+                fltk::app::lock().ok();
+                match protect {
+                    PersistentTokenKind::Plaintext => {
+                        protection_status.set_label("Token is not encrypted at-rest");
+                        protection_status.set_label_color(orbit::MARS[1]);
+                        dpapi_button.set_label("Enable encryption");
+                    },
+                    #[cfg(windows)]
+                    PersistentTokenKind::Dpapi => {
+                        protection_status.set_label("Token is encrypted at-rest");
+                        protection_status.set_color(orbit::EARTH[1]);
+                        dpapi_button.set_label("Disable encryption");
+                    }
+                }
+
+                protection_status.set_damage(true);
+                fltk::app::unlock();
+                fltk::app::awake();
+
+                if sub.changed().await.is_err() {
+                    break
+                }
+            }
+        });
+    }
+
+    Frame::default_fill();
+
+    
+    top.fixed(&label("Token Request"), 40);
     let request = request_group(state.clone());
     top.fixed(&request, 160);
 
     top.end();
     top.as_group().unwrap()
+}
+
+fn label(lbl: &str) -> Frame {
+    let mut frame = Frame::default();
+    frame.set_label(lbl);
+    frame.set_label_size(24);
+    frame.set_label_font(Font::CourierBold);
+    frame.set_label_color(orbit::SOL[0]);
+    frame.set_align(Align::Inside | Align::Left);
+    frame
 }
 
 fn request_group(state: DeimosStateHandle) -> Pack {
@@ -60,8 +127,8 @@ fn request_group(state: DeimosStateHandle) -> Pack {
         }
     }
 
-    let mut request_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
-    request_button.set_size(pack.width(), 60);
+    let mut request_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    request_button.set_size(pack.width(), 40);
     request_button.set_label("Submit Token Request");
     request_button.set_label_color(orbit::MERCURY[0]);
 
@@ -183,7 +250,7 @@ fn token_box_field(name: &'static str) -> Frame {
     let mut label = Frame::default();
     label.set_label(name);
     label.set_label_font(Font::CourierBold);
-    label.set_label_color(orbit::SOL[1]);
+    label.set_label_color(orbit::MERCURY[0]);
     label.set_label_size(20);
     row.fixed(&label, row.width() / 3);
 
@@ -204,7 +271,7 @@ fn header(state: DeimosStateHandle) -> Flex {
 
     let back_svg = SvgImage::from_data(include_str!("../../../assets/close.svg")).unwrap();
     let back_rgb = widget::svg::svg_color(back_svg, 128, orbit::MERCURY[1]);
-    let mut back_button = widget::button::button(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut back_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&back_button, row.height());
     back_button.set_image(Some(back_rgb));
     back_button.resize_callback(widget::svg::resize_image_cb(0, 0));
