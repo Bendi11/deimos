@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 
 use std::{io::Stdout, process::ExitCode, sync::Mutex};
 
