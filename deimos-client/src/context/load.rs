@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::{io::Write, path::{Path, PathBuf}};
 
 use super::{client::ContextPersistent, Context};
 
