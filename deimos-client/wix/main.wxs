@@ -86,6 +86,7 @@
         <Property Id='DiskPrompt' Value='deimos-client Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='DesktopFolder' Name='Desktop' />
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
                 <Directory Id='APPLICATIONFOLDER' Name='deimos-client'>
                     
@@ -126,11 +127,21 @@
                                 Name='deimos-client.exe'
                                 DiskId='1'
                                 Source='$(var.CargoTargetBinDir)\deimos-client.exe'
-                                KeyPath='yes'/>
+                                KeyPath='yes'>
+                                <Shortcut
+                                    Id='shortcut'
+                                    Directory='DesktopFolder'
+                                    Name='Deimos'
+                                    Description='Deimos container orchestrator'
+                                    WorkingDirectory='APPLICATIONFOLDER'
+                                    Icon='ProductICO'
+                                    IconIndex='0'
+                                    Advertise='yes' />
+                            </File>
                         </Component>
                     </Directory>
                 </Directory>
-            </Directory>
+            </Directory>    
         </Directory>
 
         <Feature
@@ -163,16 +174,14 @@
 
         <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
 
-        
         <!--
-          Uncomment the following `Icon` and `Property` tags to change the product icon.
-
-          The product icon is the graphic that appears in the Add/Remove
-          Programs control panel for the application.
+          Disabling the custom product icon for the application in the
+          Add/Remove Programs control panel requires commenting out or
+          removing the following `Icon` and `Property` tags.
         -->
-        <!--<Icon Id='ProductICO' SourceFile='wix\Product.ico'/>-->
-        <!--<Property Id='ARPPRODUCTICON' Value='ProductICO' />-->
-
+        <Icon Id='ProductICO' SourceFile='assets/icon.ico'/>
+        <Property Id='ARPPRODUCTICON' Value='ProductICO' />
+        
         <Property Id='ARPHELPLINK' Value='https://github.com/bendi11/deimos.git'/>
         
         <UI>
