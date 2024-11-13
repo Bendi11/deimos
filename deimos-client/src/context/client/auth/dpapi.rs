@@ -30,8 +30,7 @@ pub fn protect(buf: &[u8]) -> Result<Vec<u8>, DpapiError> {
         )?;
         
         let slice = std::slice::from_raw_parts(encrypt.pbData, encrypt.cbData as usize);
-        let mut vec = Vec::with_capacity(slice.len());
-        vec.copy_from_slice(slice);
+        let mut vec = Vec::from(slice);
 
         LocalFree(HLOCAL(encrypt.pbData as *mut std::ffi::c_void));
         vec

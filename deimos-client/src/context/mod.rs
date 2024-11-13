@@ -44,12 +44,8 @@ impl Context {
                     let timeout = sub.borrow_and_update().connect_timeout;
 
                     tokio::select! {
-                        _ = sub.changed() => {
-                            sub.borrow_and_update();
-                        },
-                        _ = token_sub.changed() => {
-                            token_sub.borrow_and_update();
-                        },
+                        _ = sub.changed() => {},
+                        _ = token_sub.changed() => {},
                         _ = tokio::time::sleep(timeout) => {},
                     };
                     continue
@@ -66,8 +62,12 @@ impl Context {
                             let settings = self.clients.settings.read();
                             settings.connect_timeout
                         };
-
-                        tokio::time::sleep(timeout).await;
+                        
+                        tokio::select! {
+                            _ = sub.changed() => {},
+                            _ = token_sub.changed() => {},
+                            _ = tokio::time::sleep(timeout) => {},
+                        };
                     }
                     tracing::warn!("Failed to subscribe to pod status stream: {}", e);
                     continue
