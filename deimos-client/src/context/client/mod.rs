@@ -77,6 +77,7 @@ pub struct ContextSettings {
 }
 
 impl ContextClients {
+    /// Create a new client collection and attempt an API connection using the given settings
     pub async fn new(persistent: ContextPersistent) -> Self {
         let conn = NotifyMutation::new(ContextConnectionState::Unknown);
         let cancel = Arc::new(Notify::new());

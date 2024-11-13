@@ -1,4 +1,4 @@
-use std::{io::Write, path::{Path, PathBuf}};
+use std::path::{Path, PathBuf};
 
 use super::{client::ContextPersistent, Context};
 
@@ -19,7 +19,7 @@ impl Context {
             ),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 tracing::warn!(
-                    "Failed to load config file from {}: creating a default",
+                    "Config file {} not found: creating a default",
                     config_path.display()
                 );
 

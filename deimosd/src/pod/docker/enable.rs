@@ -55,7 +55,7 @@ impl PodManager {
 
         Ok(())
     }
-
+    
     async fn create_container(&self, pod: Arc<Pod>) -> Result<DockerId, PodEnableError> {
         let config = docker_config(&pod.config.docker);
         let create_response = self

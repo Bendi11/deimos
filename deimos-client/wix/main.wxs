@@ -86,7 +86,6 @@
         <Property Id='DiskPrompt' Value='deimos-client Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
-            <Directory Id='DesktopFolder' Name='Desktop' />
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
                 <Directory Id='APPLICATIONFOLDER' Name='deimos-client'>
                     
@@ -127,21 +126,11 @@
                                 Name='deimos-client.exe'
                                 DiskId='1'
                                 Source='$(var.CargoTargetBinDir)\deimos-client.exe'
-                                KeyPath='yes'>
-                                <Shortcut
-                                    Id='shortcut'
-                                    Directory='DesktopFolder'
-                                    Name='Deimos'
-                                    Description='Deimos container orchestrator'
-                                    WorkingDirectory='APPLICATIONFOLDER'
-                                    Icon='ProductICO'
-                                    IconIndex='0'
-                                    Advertise='yes' />
-                            </File>
+                                KeyPath='yes'/>
                         </Component>
                     </Directory>
                 </Directory>
-            </Directory>    
+            </Directory>
         </Directory>
 
         <Feature

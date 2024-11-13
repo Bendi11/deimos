@@ -27,7 +27,7 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
 
         let mut connection_status = Frame::default();
         connection_status.set_label_font(Font::Screen);
-        connection_status.set_label_size(12);
+        connection_status.set_label_size(10);
         title_col.fixed(&connection_status, 16);
         
         let state = state.clone();

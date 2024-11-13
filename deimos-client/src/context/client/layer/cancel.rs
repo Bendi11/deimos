@@ -83,7 +83,6 @@ where
         }
 
         if project.cancel.poll(cx).is_ready() {
-            tracing::trace!("Request cancelled!");
             return Poll::Ready(Err(CancelServiceError::Cancelled))
         }
 

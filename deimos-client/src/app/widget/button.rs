@@ -1,4 +1,4 @@
-use fltk::{enums::{Color, Event, FrameType}, prelude::{ButtonExt, WidgetBase, WidgetExt}};
+use fltk::{enums::{Color, Event, FrameType}, prelude::{ButtonExt, WidgetBase}};
 
 
 /// Get a button initialized with the given colors, which will change background color on hover
