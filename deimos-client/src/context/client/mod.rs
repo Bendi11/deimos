@@ -33,7 +33,6 @@ pub type AuthClient = deimosproto::authclient::DeimosAuthorizationClient<CancelS
 pub struct ContextClients {
     /// Current connection state, updated by middleware in the client stack
     pub conn: NotifyMutation<ContextConnectionState>,
-    /// Settings to be 
     pub settings: NotifyMutation<ContextSettings>,
     pub token_protect: NotifyMutation<PersistentTokenKind>,
     pub token: NotifyMutation<TokenStatus>,

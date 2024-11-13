@@ -1,10 +1,8 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::path::{Path, PathBuf};
 
 use tokio::sync::Mutex;
-use tokio_stream::StreamExt;
-use tokio_util::sync::CancellationToken;
 
-use crate::server::{upnp::UpnpLease, Deimos};
+use crate::server::upnp::UpnpLease;
 
 use super::{config::PodConfig, id::{DeimosId, DockerId}};
 
@@ -53,26 +51,6 @@ pub struct PodEnable {
 #[derive(Clone)]
 pub struct PodPaused {
     pub docker_id: DockerId,
-}
-
-impl Deimos {
-    /// Monitor events received from the local Docker instance
-    pub async fn pod_task(self: Arc<Self>, cancel: CancellationToken) {
-        let mut events = self.pods.eventloop();
-        
-
-        while let Some((pod, action)) = tokio::select! {
-            _ = cancel.cancelled() => None,
-            v = events.next() => v,
-        } {
-            let this = self.clone();
-            tokio::task::spawn(async move {
-                this.pods.handle_event(pod, action).await;
-            });
-        }
-
-        self.pods.disable_all().await;
-    }
 }
 
 impl Pod {

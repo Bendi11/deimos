@@ -138,6 +138,9 @@ impl PodManager {
             },
         }?;
 
+        let docker = docker.negotiate_version().await?;
+        tracing::info!("Connected to Docker daemon {}", docker.client_version());
+
         let pods = Self::load_containers(&config.containerdir).await?;
         if pods.is_empty() {
             tracing::warn!("Starting pod manager with no pods configured");

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use fltk::{button::Button, enums::{Align, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
+use fltk::{button::Button, enums::{Align, Event, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
 use crate::context::pod::{CachedPod, CachedPodState};
 
@@ -57,7 +57,6 @@ pub fn overview(state: DeimosStateHandle) -> Group {
 
                 {
                     let mut scroll = Scroll::default_fill();
-                    top.resizable(&scroll);
                     scroll.set_frame(FrameType::NoBox);
                     scroll.set_color(orbit::NIGHT[2]);
                     scroll.set_type(ScrollType::Vertical);
@@ -73,7 +72,7 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                     scroll.resize_callback(
                         move |s,_,_,_,_| {
                             pods_pack_resize.set_pos(s.x() + 8, s.y() + 4);
-                            pods_pack_resize.set_size(s.width() - 16, 0);
+                            pods_pack_resize.set_size(s.width() - 16, s.height());
                         }
                     );
 
@@ -130,8 +129,9 @@ pub fn overview(state: DeimosStateHandle) -> Group {
 
 /// Create a button with a brief overview of the given pod
 pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
-    let mut row = Flex::new(0, 0, 0, 64, "").row();
-    
+    let mut row = Flex::default().with_size(0, 64).row();
+    row.set_spacing(1);
+
     let up_state = {
         let mut column = Flex::default().column();
         column.set_frame(FrameType::RShadowBox);
@@ -188,15 +188,13 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
     pause_button.hide();
     row.fixed(&pause_button, row.height());
     pause_button.set_image(Some(pause_rgb));
-    //pause_button.resize_callback(widget::svg::resize_image_cb(24, 24));
 
     let mut button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&button, row.height());
-    //button.resize_callback(widget::svg::resize_image_cb(16, 16));
 
 
     {
-        let mut row = row.clone();
+        let row = row.clone();
         let mut up_state = up_state.clone();
         let mut button = button.clone();
         let mut pause_button = pause_button.clone();
@@ -233,8 +231,13 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
                     }
                 }
                 
-                row.layout();
-                row.redraw();
+                let row = row.clone();
+                fltk::app::awake_callback(move || {
+                    row.layout();
+                    if let Some(mut under) = fltk::app::belowmouse::<fltk::button::Button>() {
+                        under.handle_event(Event::Enter);
+                    }
+                });
                 fltk::app::unlock();
                 fltk::app::awake();
 

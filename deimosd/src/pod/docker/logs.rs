@@ -4,24 +4,24 @@ use bollard::container::LogsOptions;
 use bytes::Bytes;
 use futures::{stream::BoxStream, Stream, StreamExt};
 
-use crate::pod::{Pod, PodManager, PodStateKnown};
-
-struct NotifyPodLogDrop;
+use crate::pod::{id::DeimosId, Pod, PodManager, PodStateKnown};
 
 /// A streamer forwarding a Docker container's logs
 #[pin_project::pin_project]
 pub struct PodLogStream {
     #[pin]
     stream: BoxStream<'static, Result<bollard::container::LogOutput, bollard::errors::Error>>,
-    other: NotifyPodLogDrop,
+    id: DeimosId,
 }
 
 impl PodManager {
+    /// Subscribe to logs from the given pod
     pub async fn subscribe_logs(&self, pod: Arc<Pod>) -> Result<PodLogStream, PodSubscribeLogsError> {
         let lock = pod.state_lock().await;
         match *lock.state() {
             PodStateKnown::Enabled(ref run) => Ok(
                 PodLogStream::new(
+                    pod.id(),
                     self
                         .docker
                         .logs(
@@ -35,7 +35,6 @@ impl PodManager {
                                 }
                             )
                         )
-                        .boxed()
                 )
             ),
             _ => Err(PodSubscribeLogsError::NotEnabled),
@@ -45,10 +44,13 @@ impl PodManager {
 
 impl PodLogStream {
     /// Create a new log streamer from the given existing stream
-    fn new(stream: impl Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send + 'static) -> Self {
+    fn new(
+        id: DeimosId,
+        stream: impl Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send + 'static
+    ) -> Self {
         Self {
             stream: stream.boxed(),
-            other: NotifyPodLogDrop,
+            id,
         }
     }
 }
@@ -68,24 +70,18 @@ impl Stream for PodLogStream {
                     Some(buf) => match buf {
                         Ok(buf) => Some(buf.into_bytes()),
                         Err(e) => {
-                            tracing::warn!("Log stream closing due to failure: {e}");
+                            tracing::warn!("Log stream for {} closing due to failure: {}", stream.id, e);
                             None
                         }
                     },
                     None => {
-                        tracing::trace!("Stream for container stopped");
+                        tracing::trace!("Log stream for {} stopped", stream.id);
                         None
                     }
                 }
             ),
             Poll::Pending => Poll::Pending,
         }
-    }
-}
-
-impl Drop for NotifyPodLogDrop {
-    fn drop(&mut self) {
-        tracing::trace!("Pod log stream dropped");
     }
 }
 

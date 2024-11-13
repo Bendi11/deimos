@@ -75,7 +75,7 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
                         dpapi_button.set_label("Disable encryption");
                     }
                 }
-
+                
                 dpapi_button.set_damage(true);
                 protection_status.set_damage(true);
                 fltk::app::unlock();
@@ -186,7 +186,9 @@ fn request_group(state: DeimosStateHandle) -> Pack {
                                 status.set_label("");
                             },
                         }
-
+                        
+                        status.set_damage(true);
+                        request_button.set_damage(true);
                         fltk::app::unlock();
                         fltk::app::awake();
                     }
