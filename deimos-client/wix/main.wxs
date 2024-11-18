@@ -57,7 +57,6 @@
 <?endif ?>
 
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
-
     <Product
         Id='*'
         Name='deimos-client'
@@ -86,6 +85,7 @@
         <Property Id='DiskPrompt' Value='deimos-client Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
+            <Directory Id='DesktopFolder' Name='Desktop' />
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
                 <Directory Id='APPLICATIONFOLDER' Name='deimos-client'>
                     
@@ -110,23 +110,24 @@
                     -->
 
                     <Directory Id='Bin' Name='bin'>
-                        <Component Id='Path' Guid='A3713B66-DC0E-407B-A192-9C4A082129CE' KeyPath='yes'>
-                            <Environment
-                                Id='PATH'
-                                Name='PATH'
-                                Value='[Bin]'
-                                Permanent='no'
-                                Part='last'
-                                Action='set'
-                                System='yes'/>
-                        </Component>
                         <Component Id='binary0' Guid='*'>
                             <File
                                 Id='exe0'
                                 Name='deimos-client.exe'
                                 DiskId='1'
                                 Source='$(var.CargoTargetBinDir)\deimos-client.exe'
-                                KeyPath='yes'/>
+                                KeyPath='yes' >
+                                <Shortcut
+                                    Id='DesktopShortcut'
+                                    Name='Deimos'
+                                    Description='Deimos server dashboard'
+                                    WorkingDirectory='Bin'
+                                    Icon='DesktopIcon.ico'
+                                    IconIndex='0'
+                                    Advertise='yes'>
+                                    <Icon Id='DesktopIcon.ico' SourceFile='deimos-client/assets/icon.ico' />
+                                </Shortcut>
+                            </File>
                         </Component>
                     </Directory>
                 </Directory>
@@ -150,15 +151,6 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
-
-            <Feature
-                Id='Environment'
-                Title='PATH Environment Variable'
-                Description='Add the install location of the [ProductName] executable to the PATH system environment variable. This allows the [ProductName] executable to be called from any location.'
-                Level='1'
-                Absent='allow'>
-                <ComponentRef Id='Path'/>
-            </Feature>
         </Feature>
 
         <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
