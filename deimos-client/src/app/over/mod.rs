@@ -142,7 +142,7 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
         title.set_label_font(crate::app::HEADER_FONT);
         title.set_label_color(orbit::SOL[1]);
         title.set_align(Align::Inside | Align::TopLeft);
-        title.set_label_size(16);
+        title.set_label_size(18);
 
         let mut up_state = Frame::default();
         up_state.set_label_font(crate::app::SUBTITLE_FONT);
