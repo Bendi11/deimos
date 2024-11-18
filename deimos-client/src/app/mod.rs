@@ -52,28 +52,9 @@ impl DeimosStateHandle {
 }
 
 pub async fn run() -> ExitCode {
-    const FONT_FILENAME: &str = "firacode-nerd-font-mono.ttf";
-
     let ctx = Context::load().await;
     let fltk_ev = App::default()
         .with_scheme(fltk::app::Scheme::Gtk);
-
-    let install_dir = match std::env::current_exe()
-        .and_then(|path| 
-            path
-                .parent()
-                .map(ToOwned::to_owned)
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, String::from("Failed to get parent directory of executable"))
-                )
-        ) {
-        Ok(dir) => dir,
-        Err(e) => {
-            tracing::warn!("Failed to get location of the running binary: {}", e);
-            PathBuf::from("./")
-        }
-    };
-    
-    let font_path = install_dir.join(FONT_FILENAME);
     
     widget::orbit_scheme();
 
