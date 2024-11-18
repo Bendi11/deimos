@@ -120,6 +120,7 @@
                                 <Shortcut
                                     Id='DesktopShortcut'
                                     Name='Deimos'
+                                    Directory='DesktopFolder'
                                     Description='Deimos server dashboard'
                                     WorkingDirectory='Bin'
                                     Icon='DesktopIcon.ico'
