@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use fltk::{button::Button, enums::{Align, Event, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
+use fltk::{button::Button, enums::{Align, Event, FrameType}, frame::Frame, group::{Flex, Group, Pack, PackType, Scroll, ScrollType}, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
 use crate::context::pod::{CachedPod, CachedPodState};
 
@@ -26,7 +26,7 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                 flex.fixed(&servers_container, 20);
 
                 let mut label = Frame::default();
-                label.set_label_font(Font::CourierBold);
+                label.set_label_font(crate::app::HEADER_FONT);
                 label.set_label_size(22);
                 label.set_label_color(orbit::SOL[0]);
                 label.set_label("Servers");
@@ -139,13 +139,13 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
         column.set_margins(8, 8, 0, 8);
 
         let mut title = Frame::default();
-        title.set_label_font(Font::CourierBold);
+        title.set_label_font(crate::app::HEADER_FONT);
         title.set_label_color(orbit::SOL[1]);
         title.set_align(Align::Inside | Align::TopLeft);
         title.set_label_size(16);
 
         let mut up_state = Frame::default();
-        up_state.set_label_font(Font::Screen);
+        up_state.set_label_font(crate::app::SUBTITLE_FONT);
         up_state.set_align(Align::Inside | Align::Left);
         up_state.set_label_size(12);
 
