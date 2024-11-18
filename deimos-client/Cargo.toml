@@ -4,7 +4,7 @@ name = "deimos-client"
 description = "Client for the Deimos container manager"
 authors = ["bkliebmann@gmail.com"]
 
-version = "1.1.6"
+version = "1.1.7"
 edition = "2021"
 
 [package.metadata.wix]

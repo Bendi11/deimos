@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "deimos-client"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "arraydeque",
  "async-stream",

@@ -148,7 +148,6 @@ impl ContextClients {
             let reason = match next {
                 Some(Ok(token)) => match DeimosToken::from_proto(token) {
                     Ok(token) => {
-                        tracing::info!("Got new token from server {:?}", token);
                         own_token.set(TokenStatus::Token(token));
                         return
                     },
