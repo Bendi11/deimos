@@ -1,4 +1,4 @@
-use fltk::{button::Button, enums::{Align, CallbackTrigger, Font, FrameType}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::Input, prelude::*};
+use fltk::{button::Button, enums::{Align, CallbackTrigger, FrameType}, frame::Frame, group::{Flex, Group, Pack}, image::SvgImage, input::Input, prelude::*};
 
 use crate::context::client::auth::{PersistentTokenKind, TokenStatus};
 
@@ -26,12 +26,12 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
     top.fixed(&label("Token Protection"), 40);
     let mut protection_status = Frame::default();
     top.fixed(&protection_status, 20);
-    protection_status.set_label_font(Font::Screen);
+    protection_status.set_label_font(crate::app::SUBTITLE_FONT);
     protection_status.set_label_size(16);
     protection_status.set_align(Align::Center | Align::Inside);
 
     let mut dpapi_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
-    dpapi_button.set_label_font(Font::Screen);
+    dpapi_button.set_label_font(crate::app::SUBTITLE_FONT);
     dpapi_button.set_label_size(18);
     dpapi_button.set_label_color(orbit::MERCURY[0]);
     top.fixed(&dpapi_button, 40);
@@ -71,7 +71,7 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
                     #[cfg(windows)]
                     PersistentTokenKind::Dpapi => {
                         protection_status.set_label("Token is encrypted at-rest");
-                        protection_status.set_color(orbit::EARTH[1]);
+                        protection_status.set_label_color(orbit::EARTH[1]);
                         dpapi_button.set_label("Disable encryption");
                     }
                 }
@@ -130,13 +130,13 @@ fn request_group(state: DeimosStateHandle) -> Pack {
     let mut request_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     request_button.set_size(pack.width(), 40);
     request_button.set_label("Submit Token Request");
-    request_button.set_label_font(Font::Screen);
+    request_button.set_label_font(crate::app::SUBTITLE_FONT);
     request_button.set_label_size(18);
     request_button.set_label_color(orbit::MERCURY[0]);
 
     let mut status = Frame::default();
     status.set_size(pack.width(), 40);
-    status.set_label_font(Font::Screen);
+    status.set_label_font(crate::app::SUBTITLE_FONT);
 
     username.set_trigger(CallbackTrigger::Changed);
     username.set_callback(move |u| {
@@ -253,13 +253,13 @@ fn token_box_field(name: &'static str) -> Frame {
     
     let mut label = Frame::default();
     label.set_label(name);
-    label.set_label_font(Font::CourierBold);
+    label.set_label_font(crate::app::HEADER_FONT);
     label.set_label_color(orbit::MERCURY[0]);
     label.set_label_size(20);
     row.fixed(&label, row.width() / 3);
 
     let mut field = Frame::default();
-    field.set_label_font(Font::Screen);
+    field.set_label_font(crate::app::SUBTITLE_FONT);
     field.set_label_color(orbit::MERCURY[0]);
     field.set_label_size(20);
 
@@ -288,7 +288,7 @@ fn header(state: DeimosStateHandle) -> Flex {
 
     let mut title = Frame::default();
     title.set_label_color(orbit::SOL[0]);
-    title.set_label_font(Font::CourierBold);
+    title.set_label_font(crate::app::HEADER_FONT);
     title.set_label("Token Management");
 
     row.resize_callback(move |r,_,_,_,_| {

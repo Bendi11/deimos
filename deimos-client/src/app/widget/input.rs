@@ -1,4 +1,4 @@
-use fltk::{enums::{Align, CallbackTrigger, Font}, frame::Frame, group::{Pack, PackType}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
+use fltk::{enums::{Align, CallbackTrigger}, frame::Frame, group::{Pack, PackType}, prelude::{GroupExt, InputExt, WidgetBase, WidgetExt}};
 
 use crate::app::orbit;
 
@@ -22,7 +22,7 @@ pub fn input_box<I: InputExt + Default>(label: &str) -> (impl GroupExt, I) {
     let mut input = I::default().with_size(frame.width(), 40);
     input.set_frame(fltk::enums::FrameType::RShadowBox);
     input.set_text_color(orbit::MERCURY[1]);
-    input.set_text_font(Font::Courier);
+    input.set_text_font(crate::app::GENERAL_FONT);
     input.set_text_size(18);
     input.set_cursor_color(orbit::SOL[0]);
     input.set_color(orbit::NIGHT[1]);

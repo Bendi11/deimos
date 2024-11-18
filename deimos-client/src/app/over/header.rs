@@ -1,4 +1,4 @@
-use fltk::{button::Button, enums::{Align, Font}, frame::Frame, group::Flex, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
+use fltk::{button::Button, enums::Align, frame::Frame, group::Flex, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
 use crate::{app::{orbit, widget, DeimosStateHandle}, context::client::ContextConnectionState};
 
@@ -21,12 +21,12 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
         let mut title_frame = Frame::default()
             .with_label("Deimos");
         title_frame.set_label_color(orbit::SOL[0]);
-        title_frame.set_label_font(Font::CourierBold);
+        title_frame.set_label_font(crate::app::HEADER_FONT);
         title_frame.set_label_size(32);
         title_col.fixed(&title_frame, 34);
 
         let mut connection_status = Frame::default();
-        connection_status.set_label_font(Font::Screen);
+        connection_status.set_label_font(crate::app::GENERAL_FONT);
         connection_status.set_label_size(10);
         title_col.fixed(&connection_status, 16);
         

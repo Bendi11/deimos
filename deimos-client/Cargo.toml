@@ -12,7 +12,7 @@ upgrade-guid = "6BFD387F-BD04-402C-9F03-809131A40CCD"
 path-guid = "A3713B66-DC0E-407B-A192-9C4A082129CE"
 license = false
 eula = false
-product-icon = "assets/icon.ico"
+product-icon = "deimos-client/assets/icon.ico"
 
 [dependencies]
 deimosproto = { path = "../deimosproto", features = ["channel"] }

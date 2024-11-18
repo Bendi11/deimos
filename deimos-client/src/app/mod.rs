@@ -1,6 +1,6 @@
-use std::{ops::Deref, process::ExitCode, sync::Arc};
+use std::{ops::Deref, path::PathBuf, process::ExitCode, sync::Arc};
 
-use fltk::{app::App, enums::Align, group::Group, prelude::{GroupExt, WidgetExt}, window::Window};
+use fltk::{app::App, enums::{Align, Font}, group::Group, prelude::{GroupExt, WidgetExt}, window::Window};
 use once_cell::sync::OnceCell;
 use tokio::sync::Mutex;
 
@@ -32,6 +32,10 @@ impl Deref for DeimosStateHandle {
     }
 }
 
+pub const HEADER_FONT: Font = Font::CourierBold;
+pub const SUBTITLE_FONT: Font = Font::Helvetica;
+pub const GENERAL_FONT: Font = Font::Courier;
+
 impl DeimosStateHandle {
     /// Hide the current view widget and show the given group
     pub async fn set_view(&self, group: Group) {
@@ -48,9 +52,28 @@ impl DeimosStateHandle {
 }
 
 pub async fn run() -> ExitCode {
+    const FONT_FILENAME: &str = "firacode-nerd-font-mono.ttf";
+
     let ctx = Context::load().await;
     let fltk_ev = App::default()
         .with_scheme(fltk::app::Scheme::Gtk);
+
+    let install_dir = match std::env::current_exe()
+        .and_then(|path| 
+            path
+                .parent()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, String::from("Failed to get parent directory of executable"))
+                )
+        ) {
+        Ok(dir) => dir,
+        Err(e) => {
+            tracing::warn!("Failed to get location of the running binary: {}", e);
+            PathBuf::from("./")
+        }
+    };
+    
+    let font_path = install_dir.join(FONT_FILENAME);
     
     widget::orbit_scheme();
 
