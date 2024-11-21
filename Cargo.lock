@@ -481,19 +481,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deimosctl"
-version = "1.1.7"
-dependencies = [
- "chrono",
- "clap",
- "deimosproto",
- "hyper-util",
- "tokio",
- "tonic",
- "tower 0.4.13",
-]
-
-[[package]]
 name = "deimosd"
 version = "1.1.7"
 dependencies = [
@@ -501,10 +488,12 @@ dependencies = [
  "bollard",
  "bytes",
  "chrono",
+ "clap",
  "dashmap",
  "deimosproto",
  "fork_stream",
  "futures",
+ "hyper-util",
  "igd-next",
  "local-ip-address",
  "pin-project",
@@ -518,6 +507,7 @@ dependencies = [
  "tokio-util",
  "toml 0.8.19",
  "tonic",
+ "tower 0.4.13",
  "tracing",
  "tracing-subscriber",
  "zeroize",

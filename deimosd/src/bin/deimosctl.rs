@@ -8,7 +8,6 @@ use tonic::transport::{Channel, Uri};
 use tower::service_fn;
 
 
-
 #[tokio::main]
 async fn main() {
     let args = DeimosCtlArgs::parse();
