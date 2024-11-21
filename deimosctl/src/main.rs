@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 
+use chrono::DateTime;
 use clap::{Parser, Subcommand};
 use hyper_util::rt::TokioIo;
 use tokio::net::UnixStream;
@@ -12,10 +13,10 @@ use tower::service_fn;
 async fn main() {
     let args = DeimosCtlArgs::parse();
     
-    let bind = args.bind.clone();
-    let channel = Channel::builder(Uri::from_static("/"))
-        .connect_with_connector(service_fn(|uri: Uri| async {
-            let uds = UnixStream::connect(uri).await?;
+    let channel = Channel::from_static("http://localhost:9115")
+        .connect_timeout(Duration::from_secs(5))
+        .connect_with_connector(service_fn(|_: Uri| async move {
+            let uds = UnixStream::connect("/tmp/deimos/api").await?;
 
             Result::<_, std::io::Error>::Ok(TokioIo::new(uds))
         }))
@@ -31,11 +32,12 @@ async fn main() {
                 }
             ).await.unwrap();
         },
-        DeimosCommand::List(list) => {
+        DeimosCommand::List(..) => {
             let pending = client.get_pending(deimosproto::GetPendingRequest {}).await.unwrap().into_inner().pending;
-            println!("USERNAME | REQUESTED DATETIME | REMOTE");
+            println!("{:^16}|{:^32}|{:^16}", "username", "datetime", "address");
             for request in pending {
-                println!("");
+                let datetime = DateTime::from_timestamp(request.requested_dt, 0).map(|dt| dt.to_string()).unwrap_or(String::from("INVALID"));
+                println!("{:^16}|{:^32}|{:^16}", request.username, datetime, request.requester_address);
             }
         }
     }

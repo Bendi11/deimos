@@ -152,10 +152,10 @@ impl Deimos {
         tokio::select! {
             _ = cancel.cancelled() => {},
             result = result => if let Err(e) = result {
-                tracing::error!("gRPC server error: {e}");
+                tracing::error!("gRPC server error: {e:?}");
             },
             result = internal => if let Err(e) = result {
-                tracing::error!("gRPC private API error: {e}");
+                tracing::error!("gRPC private API error: {e:?}");
             }
         }
     }
@@ -226,7 +226,7 @@ impl deimosproto::authserver::DeimosAuthorization for Deimos {
     async fn request_token(self: Arc<Self>, request: tonic::Request<deimosproto::TokenRequest>) -> Result<tonic::Response<Self::RequestTokenStream>, tonic::Status> {
         let requester = request.remote_addr().ok_or_else(|| tonic::Status::failed_precondition("Failed to get IP address of requester"))?;
         let username = Arc::from(request.into_inner().user);
-        Ok(tonic::Response::new(self.api.auth.create_request(requester.ip(), username)))
+        Ok(tonic::Response::new(self.api.auth.create_request(requester.ip(), username).await))
     }
 }
 

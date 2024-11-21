@@ -1,25 +1,24 @@
 
-use std::{future::Future, net::IpAddr, sync::Arc};
+use std::{net::IpAddr, sync::Arc};
 
 use futures::Stream;
 use pin_project::pin_project;
 use rand::rngs::OsRng;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 use super::{ApiAuthorization, ApiToken, ApiTokenPending};
 
 #[pin_project]
 pub struct PendingTokenStream {
     #[pin]
-    rx: tokio::sync::oneshot::Receiver<Result<ApiToken, ApiTokenIssueError>>,
+    rx: mpsc::Receiver<Result<ApiToken, ApiTokenIssueError>>,
     tokens: ApiAuthorization,
     username: Arc<str>,
 }
 
 impl ApiAuthorization {
     /// Approve the token request with the given username
-    pub fn approve(&self, request: ApiTokenPending) -> Result<ApiToken, ApiTokenIssueError> {
-        
+    pub async fn approve(&self, request: ApiTokenPending) -> Result<ApiToken, ApiTokenIssueError> {
         for _ in 0..16 {
             let token = ApiToken::rand(OsRng, request.user.clone());
             let base64 = token.key.to_base64();
@@ -32,17 +31,18 @@ impl ApiAuthorization {
                     );
                 },
                 None => {
+                    let _ = request.resolve.send(Ok(token.clone())).await;
                     self.tokens.insert(token.key.to_base64(), token.clone());
                     return Ok(token)
                 }
             }
         }
-
+        
         panic!("Generated duplicate tokens over 16 times - something is wrong with PRNG");
     }
     
     /// Create a new pending token request for the given username
-    pub fn create_request(&self, requester: IpAddr, user: Arc<str>) -> PendingTokenStream {
+    pub async fn create_request(&self, requester: IpAddr, user: Arc<str>) -> PendingTokenStream {
         let (resolve, stream) = PendingTokenStream::new(self.clone(), user.clone());
         match self.valid_username(&user) {
             Ok(_) => {
@@ -57,7 +57,7 @@ impl ApiAuthorization {
                 );
             }
             Err(e) => {
-                let _ = resolve.send(Err(e));
+                let _ = resolve.send(Err(e)).await;
             }
         }
 
@@ -69,7 +69,7 @@ impl ApiAuthorization {
     fn valid_username(&self, user: &str) -> Result<(), ApiTokenIssueError> {
         match user.chars().all(|c| c.is_ascii_alphanumeric() || c.is_ascii_punctuation()) {
             true => match self.tokens.iter().all(|entry| *entry.value().user != *user) {
-                true => match self.pending.contains_key(user) {
+                true => match !self.pending.contains_key(user) {
                     true => Ok(()),
                     false => Err(ApiTokenIssueError::UsernameInUse(user.to_owned())),
                 },
@@ -82,8 +82,8 @@ impl ApiAuthorization {
 
 impl PendingTokenStream {
     /// Create a new token stream and the sender used to resolve the token request
-    pub fn new(tokens: ApiAuthorization, username: Arc<str>) -> (oneshot::Sender<Result<ApiToken, ApiTokenIssueError>>, Self) {
-        let (tx, rx) = oneshot::channel();
+    pub fn new(tokens: ApiAuthorization, username: Arc<str>) -> (mpsc::Sender<Result<ApiToken, ApiTokenIssueError>>, Self) {
+        let (tx, rx) = mpsc::channel(1);
         (
             tx,
             Self {
@@ -99,19 +99,19 @@ impl Stream for PendingTokenStream {
     type Item = Result<deimosproto::Token, tonic::Status>;
 
     fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
-        let recv = self.project().rx;
-        let recv = futures::ready!(recv.poll(cx));
-        std::task::Poll::Ready(
-            Some(
-                recv
-                    .as_ref()
-                    .map_err(|_| tonic::Status::cancelled("Token request cancelled"))
-                    .and_then(|res| match res {
-                        Ok(token) => Ok(ApiToken::proto(token)),
-                        Err(e) => Err(tonic::Status::permission_denied(e.to_string()))
-                    })
-            )
-        )
+        let mut recv = self.project().rx;
+        let recv = futures::ready!(recv.poll_recv(cx));
+        match recv {
+            Some(recv) => std::task::Poll::Ready(
+                Some(
+                    recv
+                        .as_ref()
+                        .map_err(|e| tonic::Status::permission_denied(format!("Token request denied: {e}")))
+                        .map(ApiToken::proto)
+                )
+            ),
+            None => std::task::Poll::Pending,
+        }
     }
 }
 

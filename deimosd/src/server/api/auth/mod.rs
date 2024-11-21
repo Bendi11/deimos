@@ -1,10 +1,10 @@
-use std::{collections::BTreeSet, net::IpAddr, sync::Arc, time::Duration};
+use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use deimosproto::auth::DeimosTokenKey;
 use rand::{CryptoRng, Rng};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tonic::{async_trait, service::Interceptor};
 
 
@@ -29,7 +29,7 @@ pub struct ApiTokenPending {
     user: Arc<str>,
     requested_at: DateTime<Utc>,
     requester: IpAddr,
-    resolve: oneshot::Sender<Result<ApiToken, ApiTokenIssueError>>,
+    resolve: mpsc::Sender<Result<ApiToken, ApiTokenIssueError>>,
 }
 
 type PendingTokensCollection = Arc<DashMap<Arc<str>, ApiTokenPending>>;
@@ -113,6 +113,7 @@ impl deimosproto::internal_server::Internal for Deimos {
                     .api
                     .auth
                     .approve(pend)
+                    .await
                     .map(|_| tonic::Response::new(deimosproto::ApproveResponse {}))
                     .map_err(|e| tonic::Status::internal(e.to_string()))
             },
