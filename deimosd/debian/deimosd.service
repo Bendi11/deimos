@@ -5,6 +5,7 @@ Description="Deimos container management gRPC server"
 ExecStart=/usr/bin/deimosd
 User=deimos
 WorkingDirectory=/home/deimos
+KillSignal=SIGINT
 
 [Install]
 WantedBy=network.target

@@ -8,10 +8,9 @@ license = "none"
 
 [[bin]]
 name = "deimosctl"
-features = ["deimosctl"]
 
 [dependencies]
-deimosproto = { path = "../deimosproto", features = ["server"] }
+deimosproto = { path = "../deimosproto", features = ["server", "channel"] }
 tonic = { workspace = true, features = ["server"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "fs", "macros", "signal"] }
 fork_stream = "0.1"
@@ -47,8 +46,6 @@ clap =  { version = "4.5", features = ["derive"] }
 tower = "0.4"
 hyper-util = "0.1"
 
-[features]
-deimosctl = ["deimosproto/channel"]
 
 [package.metadata.dist]
 dist = false

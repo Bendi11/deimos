@@ -211,9 +211,7 @@ impl Upnp {
         for data in leases {
             let port = data.port;
             ports.push(port);
-            if let Err(e) = self.tx.send(UpnpMessage::Add(data)).await {
-                tracing::error!("Failed to send UPnP port update notification to UPnP maintainer: {}", e);
-            }
+            let _ = self.tx.send(UpnpMessage::Add(data)).await;
         }
 
         Ok(UpnpLease { tx: self.tx.clone(), ports: Arc::from(ports) })
@@ -256,9 +254,7 @@ impl Drop for UpnpLease {
             let tx = self.tx.clone();
             tokio::task::spawn(async move {
                 for port in ports {
-                    if let Err(e) = tx.send(UpnpMessage::Remove(port)).await {
-                        tracing::error!("Failed to send port removal message to UPnP task: {}", e);
-                    }
+                    let _ = tx.send(UpnpMessage::Remove(port)).await;
                 }
             });
         }
