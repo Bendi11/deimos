@@ -10,7 +10,7 @@ use windows::Win32::{
 pub fn protect(buf: &[u8]) -> Result<Vec<u8>, DpapiError> {
     let blob = CRYPT_INTEGER_BLOB {
         cbData: buf.len() as u32,
-        pbData: unsafe { buf.as_ptr() as *mut u8 },
+        pbData: buf.as_ptr() as *mut u8,
     };
 
     let mut encrypt = CRYPT_INTEGER_BLOB {
@@ -30,7 +30,7 @@ pub fn protect(buf: &[u8]) -> Result<Vec<u8>, DpapiError> {
         )?;
         
         let slice = std::slice::from_raw_parts(encrypt.pbData, encrypt.cbData as usize);
-        let mut vec = Vec::from(slice);
+        let vec = Vec::from(slice);
 
         LocalFree(HLOCAL(encrypt.pbData as *mut std::ffi::c_void));
         vec
@@ -40,7 +40,7 @@ pub fn protect(buf: &[u8]) -> Result<Vec<u8>, DpapiError> {
 pub fn unprotect(buf: &[u8])  -> Result<Vec<u8>, DpapiError> {
     let blob = CRYPT_INTEGER_BLOB {
         cbData: buf.len() as u32,
-        pbData: unsafe { buf.as_ptr() as *mut u8 },
+        pbData: buf.as_ptr() as *mut u8,
     };
 
     let mut unprotect = CRYPT_INTEGER_BLOB {
@@ -60,7 +60,7 @@ pub fn unprotect(buf: &[u8])  -> Result<Vec<u8>, DpapiError> {
         )?;
 
         let slice = std::slice::from_raw_parts(unprotect.pbData, unprotect.cbData as usize);
-        let mut vec = Vec::from(slice);
+        let vec = Vec::from(slice);
         
         LocalFree(HLOCAL(unprotect.pbData as *mut std::ffi::c_void));
         vec

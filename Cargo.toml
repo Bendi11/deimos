@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "deimosd",
+    "deimosctl",
     "deimosproto",
     "deimos-client"
 ]

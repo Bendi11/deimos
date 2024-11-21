@@ -6,6 +6,7 @@ pub mod svg;
 pub mod button;
 pub mod input;
 
+/// Apply FLTK global styling defaults
 pub fn orbit_scheme() {
     fltk::app::reload_scheme().ok();
 

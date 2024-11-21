@@ -1,4 +1,4 @@
-use std::{ops::Deref, path::PathBuf, process::ExitCode, sync::Arc};
+use std::{ops::Deref, process::ExitCode, sync::Arc};
 
 use fltk::{app::App, enums::{Align, Font}, group::Group, prelude::{GroupExt, WidgetExt}, window::Window};
 use once_cell::sync::OnceCell;
@@ -8,7 +8,7 @@ use crate::context::Context;
 
 
 pub mod orbit;
-pub mod widget;
+pub mod style;
 mod over;
 mod auth;
 mod settings;
@@ -51,12 +51,13 @@ impl DeimosStateHandle {
     }
 }
 
+/// Create a new FLTK event loop, load state from the save directory, and run the UI to completion
 pub async fn run() -> ExitCode {
     let ctx = Context::load().await;
     let fltk_ev = App::default()
         .with_scheme(fltk::app::Scheme::Gtk);
     
-    widget::orbit_scheme();
+    style::orbit_scheme();
 
     let mut window = Window::default()
         .with_size(400, 600);

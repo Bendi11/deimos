@@ -1,6 +1,6 @@
 use fltk::{button::Button, enums::Align, frame::Frame, group::Flex, image::SvgImage, prelude::{GroupExt, WidgetBase, WidgetExt}};
 
-use crate::{app::{orbit, widget, DeimosStateHandle}, context::client::ContextConnectionState};
+use crate::{app::{orbit, style, DeimosStateHandle}, context::client::ContextConnectionState};
 
 
 pub fn header(state: DeimosStateHandle) -> impl GroupExt {
@@ -12,7 +12,7 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
 
     let deimos_icon = SvgImage::from_data(include_str!("../../../assets/mars-deimos.svg"))
         .unwrap();
-    let deimos_rgb = widget::svg::svg_color(deimos_icon, 64, orbit::MARS[2]);
+    let deimos_rgb = style::svg::svg_color(deimos_icon, 64, orbit::MARS[2]);
     let mut frame = Frame::default().with_size(64, 64);
     frame.set_image(Some(deimos_rgb));
     
@@ -76,9 +76,9 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
     
     let icon_size = row.height() - 16;
     let authentication_icon = SvgImage::from_data(include_str!("../../../assets/key.svg")).unwrap();
-    let authentication_grey = widget::svg::svg_color(authentication_icon.clone(), icon_size, orbit::MERCURY[2]);
-    let authentication_red  = widget::svg::svg_color(authentication_icon, icon_size, orbit::MARS[2]);
-    let mut authentication_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let authentication_grey = style::svg::svg_color(authentication_icon.clone(), icon_size, orbit::MERCURY[2]);
+    let authentication_red  = style::svg::svg_color(authentication_icon, icon_size, orbit::MARS[2]);
+    let mut authentication_button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     {
         let state = state.clone();
         authentication_button.set_callback(move |_| {
@@ -121,8 +121,8 @@ pub fn header(state: DeimosStateHandle) -> impl GroupExt {
     }
 
     let settings_icon = SvgImage::from_data(include_str!("../../../assets/settings.svg")).unwrap();
-    let settings_rgb = widget::svg::svg_color(settings_icon, row.height() - 16, orbit::MERCURY[2]);
-    let mut settings_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let settings_rgb = style::svg::svg_color(settings_icon, row.height() - 16, orbit::MERCURY[2]);
+    let mut settings_button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     settings_button.set_image(Some(settings_rgb));
     settings_button.set_callback(move |_| {
         let state = state.clone();

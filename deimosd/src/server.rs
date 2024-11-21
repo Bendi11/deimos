@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
-use api::{ApiConfig, ApiInitError, ApiState};
+use api::{ApiConfig, ApiInitError, ApiPersistent, ApiState};
 #[cfg(unix)]
 use tokio::signal::unix::SignalKind;
 use tokio_stream::StreamExt;
@@ -24,10 +24,20 @@ pub struct Deimos {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeimosConfig {
+    /// Path to write a save files to
+    pub save_path: PathBuf,
+    /// Configuration for the pod manager
     pub pod: PodManagerConfig,
+    /// Configuration for the public and private API servers
     pub api: ApiConfig,
+    /// Configuration for the UPnP client
     #[serde(default)]
     pub upnp: UpnpConfig,
+}
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct DeimosPersistent {
+    api: ApiPersistent,
 }
 
 impl Deimos {
@@ -35,8 +45,16 @@ impl Deimos {
     /// and creating a TCP listener for the control interface.
     /// Then run the server until an interrupt signal is received or a fatal error occurs
     pub async fn run(config: DeimosConfig) -> Result<(), DeimosRunError> {
+        let persistent = match std::fs::File::open(&config.save_path) {
+            Ok(file) => serde_json::from_reader::<_, DeimosPersistent>(file)?,
+            Err(e) => {
+                tracing::warn!("Failed to load save file from {}: {}", config.save_path.display(), e);
+                Default::default()
+            }
+        };
+
         let (upnp, upnp_rx) = Upnp::new(config.upnp).await?;
-        let api = ApiState::new(&upnp, config.api).await?;
+        let api = ApiState::load(persistent.api, config.api, &upnp).await?;
         let pods = PodManager::new(config.pod, upnp.clone()).await?;
         let this = Arc::new(
             Self {
@@ -85,9 +103,15 @@ impl Deimos {
             pods,
         };
 
-        if let Err(e) = this.api.save() {
-            tracing::error!("Failed to save API state: {}", e);
-        }
+        let persistent = DeimosPersistent {
+            api: this.api.save()
+        };
+
+        serde_json::to_writer(
+            std::fs::File::create(&config.save_path)
+                .map_err(|err| DeimosRunError::SavePersistent { path: config.save_path.clone(), err })?,
+            &persistent
+        )?;
         
         Ok(())
     }
@@ -113,6 +137,13 @@ impl Deimos {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeimosRunError {
+    #[error("Failed to create save file {}: {}", path.display(), err)]
+    SavePersistent {
+        path: PathBuf,
+        err: std::io::Error,
+    },
+    #[error("Failed to serialize persistent data: {0}")]
+    Serialize(#[from] serde_json::Error),
     #[error("Failed to initialize API server: {0}")]
     Api(#[from] ApiInitError),
     #[error("Failed to initialize Docker service: {0}")]

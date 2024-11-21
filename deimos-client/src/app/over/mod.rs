@@ -4,7 +4,7 @@ use fltk::{button::Button, enums::{Align, Event, FrameType}, frame::Frame, group
 
 use crate::context::pod::{CachedPod, CachedPodState};
 
-use super::{orbit, widget, DeimosStateHandle};
+use super::{orbit, style, DeimosStateHandle};
 
 pub mod header;
 
@@ -33,8 +33,8 @@ pub fn overview(state: DeimosStateHandle) -> Group {
                 label.set_align(Align::Inside | Align::Left);
                 
                 let reload_svg = SvgImage::from_data(include_str!("../../../assets/reload.svg")).unwrap();
-                let reload_rgb = widget::svg::svg_color(reload_svg, servers_container.height(), orbit::MERCURY[2]);
-                let mut reload_button = widget::button::button::<Button>(orbit::NIGHT[2], orbit::NIGHT[0]);
+                let reload_rgb = style::svg::svg_color(reload_svg, servers_container.height(), orbit::MERCURY[2]);
+                let mut reload_button = style::button::button::<Button>(orbit::NIGHT[2], orbit::NIGHT[0]);
                 servers_container.fixed(&reload_button, servers_container.height());
                 reload_button.set_image(Some(reload_rgb));
                 reload_button.set_align(Align::Center);
@@ -173,23 +173,23 @@ pub fn pod_button(state: DeimosStateHandle, pod: Arc<CachedPod>) -> Flex {
     let dim = row.height() - 16;
     
     let start_svg = SvgImage::from_data(include_str!("../../../assets/start.svg")).unwrap();
-    let start_rgb = widget::svg::svg_color(start_svg, dim, orbit::MERCURY[1]);
+    let start_rgb = style::svg::svg_color(start_svg, dim, orbit::MERCURY[1]);
     
     let stop_svg = SvgImage::from_data(include_str!("../../../assets/stop.svg")).unwrap();
-    let stop_rgb = widget::svg::svg_color(stop_svg, dim, orbit::MARS[2]);
+    let stop_rgb = style::svg::svg_color(stop_svg, dim, orbit::MARS[2]);
 
     let load_svg = SvgImage::from_data(include_str!("../../../assets/reload.svg")).unwrap();
-    let load_rgb = widget::svg::svg_color(load_svg, dim, orbit::EARTH[1]);
+    let load_rgb = style::svg::svg_color(load_svg, dim, orbit::EARTH[1]);
 
     let pause_svg = SvgImage::from_data(include_str!("../../../assets/pause.svg")).unwrap();
-    let pause_rgb = widget::svg::svg_color(pause_svg, dim - 16, orbit::VENUS[3]);
+    let pause_rgb = style::svg::svg_color(pause_svg, dim - 16, orbit::VENUS[3]);
 
-    let mut pause_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut pause_button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     pause_button.hide();
     row.fixed(&pause_button, row.height());
     pause_button.set_image(Some(pause_rgb));
 
-    let mut button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&button, row.height());
 
 

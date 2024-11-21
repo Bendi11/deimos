@@ -3,7 +3,7 @@ use fltk::{enums::{Align, CallbackTrigger}, frame::Frame, group::{Pack, PackType
 use crate::app::orbit;
 
 
-
+/// Create a new label meant to precede an input box
 pub fn input_lbl(label: &str) -> Frame {
     let mut host_lbl = Frame::default();
     host_lbl.set_align(Align::Inside | Align::Left);
@@ -13,6 +13,8 @@ pub fn input_lbl(label: &str) -> Frame {
     host_lbl
 }
 
+/// Create a new standard input box with the given label.
+/// Returns a tuple with (container with label and input, input)
 pub fn input_box<I: InputExt + Default>(label: &str) -> (impl GroupExt, I) {
     let mut frame = Pack::default_fill();
     frame.set_spacing(8);

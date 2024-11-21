@@ -2,7 +2,7 @@ use fltk::{button::Button, enums::{Align, CallbackTrigger, FrameType}, frame::Fr
 
 use crate::context::client::auth::{PersistentTokenKind, TokenStatus};
 
-use super::{orbit, widget::{self}, DeimosStateHandle};
+use super::{orbit, style::{self}, DeimosStateHandle};
 
 
 
@@ -22,6 +22,11 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
 
     Frame::default_fill();
 
+    top.fixed(&label("Token Request"), 40);
+    let request = request_group(state.clone());
+    top.fixed(&request, 140);
+
+    Frame::default_fill();
 
     top.fixed(&label("Token Protection"), 40);
     let mut protection_status = Frame::default();
@@ -30,7 +35,7 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
     protection_status.set_label_size(16);
     protection_status.set_align(Align::Center | Align::Inside);
 
-    let mut dpapi_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut dpapi_button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     dpapi_button.set_label_font(crate::app::SUBTITLE_FONT);
     dpapi_button.set_label_size(18);
     dpapi_button.set_label_color(orbit::MERCURY[0]);
@@ -88,13 +93,6 @@ pub fn authorization(state: DeimosStateHandle) -> Group {
         });
     }
 
-    Frame::default_fill();
-
-    
-    top.fixed(&label("Token Request"), 40);
-    let request = request_group(state.clone());
-    top.fixed(&request, 140);
-
     top.end();
     top.as_group().unwrap()
 }
@@ -111,7 +109,7 @@ fn label(lbl: &str) -> Frame {
 fn request_group(state: DeimosStateHandle) -> Pack {
     let pack = Pack::default_fill();
 
-    let (mut frame, mut username) = widget::input::input_box::<Input>("Username");
+    let (mut frame, mut username) = style::input::input_box::<Input>("Username");
     frame.set_size(pack.width(), 40);
     match hostname::get() {
         Ok(hostname) => match hostname.to_str() {
@@ -127,7 +125,7 @@ fn request_group(state: DeimosStateHandle) -> Pack {
         }
     }
 
-    let mut request_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let mut request_button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     request_button.set_size(pack.width(), 40);
     request_button.set_label("Submit Token Request");
     request_button.set_label_font(crate::app::SUBTITLE_FONT);
@@ -275,8 +273,8 @@ fn header(state: DeimosStateHandle) -> Flex {
         .with_align(Align::Center);
 
     let back_svg = SvgImage::from_data(include_str!("../../../assets/close.svg")).unwrap();
-    let back_rgb = widget::svg::svg_color(back_svg, row.height() - 16, orbit::MERCURY[1]);
-    let mut back_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let back_rgb = style::svg::svg_color(back_svg, row.height() - 16, orbit::MERCURY[1]);
+    let mut back_button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     row.fixed(&back_button, row.height());
     back_button.set_image(Some(back_rgb));
     back_button.set_callback(move |_| {

@@ -5,7 +5,7 @@ use http::Uri;
 
 use crate::context::client::ContextSettings;
 
-use super::{orbit, widget::{self, input::input_box}, DeimosStateHandle};
+use super::{orbit, style::{self, input::input_box}, DeimosStateHandle};
 
 
 pub fn settings(state: DeimosStateHandle) -> Group {
@@ -18,8 +18,8 @@ pub fn settings(state: DeimosStateHandle) -> Group {
     top.hide();
     
     let save = SvgImage::from_data(include_str!("../../assets/check.svg")).unwrap();
-    let save_img = widget::svg::svg_color(save, 42, orbit::SOL[1]);
-    let mut save_button = widget::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
+    let save_img = style::svg::svg_color(save, 42, orbit::SOL[1]);
+    let mut save_button = style::button::button::<Button>(orbit::NIGHT[1], orbit::NIGHT[0]);
     save_button.set_size(42, 42);
     save_button.set_image(Some(save_img));
 

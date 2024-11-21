@@ -1,0 +1,28 @@
+syntax = 'proto3';
+
+package deimos;
+
+message PendingTokenRequest {
+    string username = 1;
+    int64 requested_dt = 2;
+    string requester_address = 3;
+}
+
+message GetPendingRequest {}
+
+message GetPendingResponse {
+    repeated PendingTokenRequest pending = 1;
+}
+
+message ApproveRequest {
+    string username = 1;
+}
+
+message ApproveResponse {}
+
+service Internal {
+    /// Get all pending token requests
+    rpc GetPending(GetPendingRequest) returns(GetPendingResponse);
+    /// Approve a pending token request by username
+    rpc Approve(ApproveRequest) returns(ApproveResponse);
+}

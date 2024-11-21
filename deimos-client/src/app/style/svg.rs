@@ -1,6 +1,8 @@
 use fltk::{enums::Color, image::{RgbImage, SvgImage}, prelude::ImageExt};
 
 
+/// Render the given SVG image for the given size, and recolor all non-transparent pixels to the
+/// given color
 pub fn svg_color(img: SvgImage, sz: i32, color: Color) -> RgbImage {
     let mut img = img.copy_sized(sz, sz);
     img.normalize();

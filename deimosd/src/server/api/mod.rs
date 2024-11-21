@@ -1,10 +1,10 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use auth::{ApiAuthorization, ApiAuthorizationConfig, ApiAuthorizationPersistent, PendingTokenStream};
 use bytes::Bytes;
 use futures::StreamExt;
 use igd_next::PortMappingProtocol;
-use persist::{ApiPersistError, ApiPersistent};
 use pin_project::pin_project;
 use tokio_util::sync::CancellationToken;
 use tonic::service::interceptor::InterceptedService;
@@ -21,14 +21,13 @@ use super::Deimos;
 use deimosproto::{self as proto};
 
 mod auth;
-mod persist;
 
 /// State required exclusively for the gRPC server including UPnP port leases.
 pub struct ApiState {
     /// Configuration parsed from the global config file
     pub config: ApiConfig,
-    /// Data persisted in a save file for the API
-    pub persistent: ApiPersistent,
+    /// Authorization state with all approved and pending tokens
+    pub auth: ApiAuthorization,
     /// Address leased for the API
     pub _lease: Option<UpnpLease>,
 }
@@ -37,21 +36,33 @@ pub struct ApiState {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApiConfig {
+    /// Address to bind to when serving the public interface
     pub bind: SocketAddr,
+    /// Enable UPnP port forwarding for the public API
     #[serde(default)]
     pub upnp: bool,
+    /// Path to a public certificate file for TLS
     pub certificate: PathBuf,
+    /// Path to TLS private key
     pub privkey: PathBuf,
+    /// Timeout for API connections
     #[serde(default = "ApiConfig::default_timeout")]
     pub timeout: Duration,
+    /// Configuration for the authorization component
     #[serde(default)]
-    pub persist_path: PathBuf,
+    pub auth: ApiAuthorizationConfig,
+}
+
+/// Persistent state for the API
+#[derive(Default, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ApiPersistent {
+    pub tokens: ApiAuthorizationPersistent,
 }
 
 impl ApiState {
     /// Load the Deimos API service configuration and store a handle to the local Docker instance
     /// to manage containers
-    pub async fn new(upnp: &Upnp, config: ApiConfig) -> Result<Self, ApiInitError> {
+    pub async fn load(persistent: ApiPersistent, config: ApiConfig, upnp: &Upnp) -> Result<Self, ApiInitError> {
         let lease = match config.upnp {
             true => Some(
                 upnp
@@ -67,13 +78,16 @@ impl ApiState {
             false => None,
         };
 
-        let persistent = ApiPersistent::load(&config.persist_path);
+        let auth = ApiAuthorization::load(persistent.tokens, config.auth.clone());
 
-        Ok(Self { config, _lease: lease, persistent })
+        Ok(Self { config, _lease: lease, auth })
     }
-
-    pub fn save(&self) -> Result<(), ApiPersistError> {
-        self.persistent.save(&self.config.persist_path)
+    
+    /// Get persistent state to be written to a save file for the server
+    pub fn save(&self) -> ApiPersistent {
+        ApiPersistent {
+            tokens: self.auth.persistent(),
+        }
     }
     
     /// Apply settings given in the API configuration to create a new gRPC server
@@ -118,7 +132,7 @@ impl Deimos {
             .add_service(
                 InterceptedService::new(
                     proto::server::DeimosServiceServer::from_arc(self.clone()),
-                    self.api.persistent.tokens.clone(),
+                    self.api.auth.clone(),
                 )
             )
             .add_service(proto::authserver::DeimosAuthorizationServer::from_arc(self.clone()))
@@ -149,6 +163,17 @@ impl From<PodState> for proto::PodState {
             PodState::Paused => proto::PodState::Paused,
             PodState::Enabled => proto::PodState::Enabled,
         }
+    }
+}
+
+#[async_trait]
+impl deimosproto::authserver::DeimosAuthorization for Deimos {
+    type RequestTokenStream = PendingTokenStream;
+
+    async fn request_token(self: Arc<Self>, request: tonic::Request<deimosproto::TokenRequest>) -> Result<tonic::Response<Self::RequestTokenStream>, tonic::Status> {
+        let requester = request.remote_addr().ok_or_else(|| tonic::Status::failed_precondition("Failed to get IP address of requester"))?;
+        let username = Arc::from(request.into_inner().user);
+        Ok(tonic::Response::new(self.api.auth.create_request(requester.ip(), username)))
     }
 }
 
