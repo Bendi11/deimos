@@ -2,7 +2,7 @@
 name = "deimosd"
 description = "Deimos docker orchestrator daemon and CLI control application"
 authors = ["bkliebmann@gmail.com"]
-version = "1.1.7"
+version = "1.1.8"
 edition = "2021"
 license = "none"
 
