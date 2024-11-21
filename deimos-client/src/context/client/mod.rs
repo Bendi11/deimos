@@ -153,7 +153,7 @@ impl ContextClients {
                     },
                     Err(e) => format!("Failed to decode received token: {}", e),
                 }
-                Some(Err(e)) => format!("Failed to receive token from server: {}", e),
+                Some(Err(e)) => format!("Failed to receive token from server: {}", e.message()),
                 None => String::from("Token request stream closed before token was received"),
             };
 

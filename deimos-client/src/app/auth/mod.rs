@@ -135,6 +135,7 @@ fn request_group(state: DeimosStateHandle) -> Pack {
     let mut status = Frame::default();
     status.set_size(pack.width(), 40);
     status.set_label_font(crate::app::SUBTITLE_FONT);
+    status.set_align(Align::Center | Align::Inside);
 
     username.set_trigger(CallbackTrigger::Changed);
     username.set_callback(move |u| {
@@ -170,13 +171,16 @@ fn request_group(state: DeimosStateHandle) -> Pack {
                         let token = sub.borrow();
                         fltk::app::lock().ok();
                         request_button.activate();
+
                         match *token {
                             TokenStatus::Denied { ref reason } => {
                                 status.set_label_color(orbit::MARS[2]);
+                                status.set_label_size(12);
                                 status.set_label(reason);
                             },
                             TokenStatus::Requested { ref user, .. } => {
                                 status.set_label_color(orbit::EARTH[1]);
+                                status.set_label_size(14);
                                 status.set_label(&format!("Requested token with username '{}'", user));
                                 request_button.deactivate();
                             },
