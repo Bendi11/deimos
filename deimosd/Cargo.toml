@@ -4,7 +4,6 @@ authors = ["Ben"]
 version = "1.1.7"
 edition = "2021"
 license = "none"
-dist = false
 
 [dependencies]
 deimosproto = { path = "../deimosproto", features = ["server"] }
@@ -37,3 +36,6 @@ chrono = { workspace = true }
 local-ip-address = "0.6"
 
 rand = "0.8"
+
+[package.metadata.dist]
+dist = false
