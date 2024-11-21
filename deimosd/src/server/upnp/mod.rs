@@ -23,10 +23,14 @@ pub struct Upnp {
     local_ip: IpAddr,
 }
 
+/// User-provided configuration options for the UPnP client
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct UpnpConfig {
+    /// Time to set the UPnP leases to expire after
     #[serde(default="UpnpConfig::default_renewal_seconds")]
     pub renewal_seconds: u32,
+    /// If enabled, UPnP leases will be removed once all tasks drop their permits for the lease
+    /// instead of waiting for the leases to timeout.
     #[serde(default)]
     pub remove_immediate: bool,
 }
@@ -51,6 +55,7 @@ pub struct UpnpLeaseData {
 #[derive(Debug)]
 pub struct LeaseTrack {
     pub data: UpnpLeaseData,
+    /// Reference count on the number of tasks holding a permit for this lease
     pub rc: usize,
 }
 
@@ -74,9 +79,6 @@ impl Deimos {
 }
 
 impl Upnp {
-    /// Renew UPNP leases every fifteen minutes
-    pub const RENEWAL_INTERVAL: Duration = Duration::from_secs(60 * 15);
-
     /// Retrieve the local IP address from the network adapter and create an empty map of forwarded
     /// ports
     pub async fn new(conf: UpnpConfig) -> Result<(Self, UpnpReceiver), UpnpInitError> {
@@ -108,7 +110,7 @@ impl Upnp {
             }
         };
 
-        let mut renewal_interval = tokio::time::interval(Self::RENEWAL_INTERVAL);
+        let mut renewal_interval = tokio::time::interval(Duration::from_secs(self.conf.renewal_seconds as u64));
         renewal_interval.tick().await;
         renewal_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -145,10 +147,11 @@ impl Upnp {
                 UpnpMessage::Remove(port) => match bound.get_mut(&port) {
                     Some(entry) => {
                         entry.rc -= 1;
-                        if entry.rc == 0 {
+                        if entry.rc == 0 && self.conf.remove_immediate {
                             self.remove(&gateway, &entry.data).await;
-                            bound.remove(&port);
                         }
+
+                        bound.remove(&port);
                     },
                     None => {
                         tracing::warn!("Got UPnP remove port message for untracked port {}", port);
@@ -176,7 +179,7 @@ impl Upnp {
                 lease.protocol,
                 lease.port,
                 SocketAddr::new(self.local_ip, lease.port),
-                (Self::RENEWAL_INTERVAL.as_secs() + 60) as u32,
+                self.conf.renewal_seconds + 10,
                 &lease.name,
             )
             .await

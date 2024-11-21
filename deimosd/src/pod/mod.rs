@@ -37,6 +37,7 @@ pub type PodStateStream = SelectAll<
     >,
 >;
 
+/// A stream that maps events received from the local Docker server to their corresponding pods
 pub struct DockerEventStream {
     inner: BoxStream<'static, Result<bollard::secret::EventMessage, bollard::errors::Error>>,
     docker: Docker,
@@ -64,51 +65,6 @@ impl DockerEventStream {
             inner: Self::subscribe(&docker),
             docker,
             reverse,
-        }
-    }
-}
-
-impl Stream for DockerEventStream {
-    type Item = (Arc<Pod>, String);
-
-    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            let next = futures::ready!(self.inner.as_mut().poll_next(cx));
-            match next {
-                Some(event) => match event {
-                    Ok(ev) => match ev.typ {
-                        Some(EventMessageTypeEnum::CONTAINER) => {
-                            let Some(actor) = ev.actor else {
-                                tracing::warn!("Received container event with no actor");
-                                continue;
-                            };
-
-                            let Some(id) = actor.id else {
-                                tracing::warn!("Received container event with no actor ID");
-                                continue;
-                            };
-
-                            let Some(action) = ev.action else {
-                                tracing::warn!("Received container event with no action");
-                                continue;
-                            };
-
-                            if let Some(pod) = self.reverse.get(id.as_str()) {
-                                break Poll::Ready(Some((pod.clone(), action)))
-                            }
-                        },
-                        _ => {
-                            tracing::warn!("Got unwanted Docker event {:?}", ev.typ);
-                        }
-                    },
-                    Err(e) => {
-                        tracing::error!("Docker event stream closed unexpectedly: {}", e);
-                    }
-                },
-                None => {
-                    self.inner = Self::subscribe(&self.docker);
-                }
-            }
         }
     }
 }
@@ -161,7 +117,7 @@ impl PodManager {
     pub fn stream(&self) -> PodStateStream {
         let iter = self.pods.values().cloned().map(|pod| {
             let id = pod.id();
-            tokio_stream::wrappers::WatchStream::new(pod.state.tx.subscribe()).map(Box::<PodStateStreamMapper>::from(
+            pod.state().subscribe().map(Box::<PodStateStreamMapper>::from(
                 Box::new(move |state| (id.clone(), state)),
             ))
         });
@@ -182,20 +138,22 @@ impl PodManager {
     /// Handle an event received from the [eventloop](Self::eventloop) stream
     pub async fn handle_event(&self, pod: Arc<Pod>, action: String) {
         tracing::trace!("Pod {} got event '{}'", pod.id(), action);
-        let state = pod.state_wait().await;
+        let lock = pod.state().read().await;
 
         match action.as_str() {
-            "die" => match state {
+            "die" => match *lock {
                 PodStateKnown::Disabled => {
 
                 },
                 PodStateKnown::Paused(..) => {
                     tracing::info!("Paused container {} died unexpectedly", pod.id());
-                    let _ = self.disable(pod).await;
+                    let lock = pod.state().upgrade(lock);
+                    let _ = self.disable(pod.clone(), lock).await;
                 },
                 PodStateKnown::Enabled(..) => {
                     tracing::warn!("Running container {} died unexpectedly", pod.id());
-                    let _ = self.disable(pod).await;
+                    let lock = pod.state().upgrade(lock);
+                    let _ = self.disable(pod.clone(), lock).await;
                 }
             },
             _ => {},
@@ -264,6 +222,51 @@ impl PodManager {
     /// Get an immutable iterator over references to the managed pods
     pub fn iter(&self) -> impl Iterator<Item = (&DeimosId, &Arc<Pod>)> {
         self.pods.iter()
+    }
+}
+
+impl Stream for DockerEventStream {
+    type Item = (Arc<Pod>, String);
+
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            let next = futures::ready!(self.inner.as_mut().poll_next(cx));
+            match next {
+                Some(event) => match event {
+                    Ok(ev) => match ev.typ {
+                        Some(EventMessageTypeEnum::CONTAINER) => {
+                            let Some(actor) = ev.actor else {
+                                tracing::warn!("Received container event with no actor");
+                                continue;
+                            };
+
+                            let Some(id) = actor.id else {
+                                tracing::warn!("Received container event with no actor ID");
+                                continue;
+                            };
+
+                            let Some(action) = ev.action else {
+                                tracing::warn!("Received container event with no action");
+                                continue;
+                            };
+
+                            if let Some(pod) = self.reverse.get(id.as_str()) {
+                                break Poll::Ready(Some((pod.clone(), action)))
+                            }
+                        },
+                        _ => {
+                            tracing::warn!("Got unwanted Docker event {:?}", ev.typ);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!("Docker event stream closed unexpectedly: {}", e);
+                    }
+                },
+                None => {
+                    self.inner = Self::subscribe(&self.docker);
+                }
+            }
+        }
     }
 }
 

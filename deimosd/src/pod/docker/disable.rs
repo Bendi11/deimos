@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::{stream::FuturesUnordered, StreamExt};
 
-use crate::pod::{id::DockerId, Pod, PodManager, PodStateKnown};
+use crate::pod::{id::DockerId, state::PodStateWriteHandle, Pod, PodManager, PodStateKnown};
 
 
 impl PodManager {
@@ -14,7 +14,7 @@ impl PodManager {
             .pods
             .values()
             .cloned()
-            .map(|pod| self.disable(pod))
+            .map(|pod| async move { self.disable(pod.clone(), pod.state().transact().await).await })
             .collect::<FuturesUnordered<_>>();
 
         let mut errors = Vec::new();
@@ -29,13 +29,12 @@ impl PodManager {
 
     /// Top-level operation to disable the given pod.
     /// Gracefully, then forcefully stops and removes the Docker container as required.
-    pub async fn disable(&self, pod: Arc<Pod>) -> Result<(), PodDisableError> {
-        let mut lock = pod.state_lock().await;
+    pub async fn disable(&self, pod: Arc<Pod>, mut lock: PodStateWriteHandle<'_>) -> Result<(), PodDisableError> {
         let docker_id = match lock.state() {
             PodStateKnown::Disabled => return Ok(()),
             PodStateKnown::Paused(ref paused) => paused.docker_id.clone(),
             PodStateKnown::Enabled(ref running) => {
-                self.stop_container(&pod, &running.docker_id, pod.config.docker.stop_timeout)
+                self.stop_container(&pod, &running.docker_id, pod.config().docker.stop_timeout)
                     .await?;
                 running.docker_id.clone()
             }

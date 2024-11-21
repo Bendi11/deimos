@@ -17,8 +17,8 @@ pub struct PodLogStream {
 impl PodManager {
     /// Subscribe to logs from the given pod
     pub async fn subscribe_logs(&self, pod: Arc<Pod>) -> Result<PodLogStream, PodSubscribeLogsError> {
-        let lock = pod.state_lock().await;
-        match *lock.state() {
+        let lock = pod.state().read().await;
+        match *lock {
             PodStateKnown::Enabled(ref run) => Ok(
                 PodLogStream::new(
                     pod.id(),

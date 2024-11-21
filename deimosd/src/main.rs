@@ -1,3 +1,5 @@
+#![deny(unused_must_use)]
+
 use std::process::ExitCode;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt, FmtSubscriber};

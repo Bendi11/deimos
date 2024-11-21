@@ -1,26 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use tokio::sync::Mutex;
-
 use crate::server::upnp::UpnpLease;
 
 use super::{config::PodConfig, id::{DeimosId, DockerId}};
 
+mod handle;
+
+pub use handle::{PodStateHandle, PodStateWriteHandle, PodStateReadHandle};
+
 /// Represents a single pod with associated config and running Docker container if any exists
 pub struct Pod {
-    pub(super) config: PodConfig,
-    pub(super) state: PodStateHandle,
-}
-
-pub struct PodStateHandle {
-    pub(super) lock: Mutex<PodStateKnown>,
-    pub(super) tx: tokio::sync::watch::Sender<PodState>,
-}
-
-/// A handle allowing mutations to the state of a [Pod]
-pub struct PodStateWriteHandle<'a> {
-    lock: tokio::sync::MutexGuard<'a, PodStateKnown>,
-    tx: tokio::sync::watch::Sender<PodState>,
+    config: PodConfig,
+    state: PodStateHandle,
 }
 
 /// Current state of a pod - including if the state is currently unknown and being modified
@@ -63,22 +54,15 @@ impl Pod {
     pub fn id(&self) -> DeimosId {
         self.config.id.clone()
     }
-
-    /// Get an immutable reference to the current state
-    pub fn state(&self) -> PodState {
-        self.state.current()
-    }
-
-    /// Wait until other mutable accesses to the current state have finished, then acquire a lock
-    /// and return
-    pub async fn state_lock(&self) -> PodStateWriteHandle {
-        self.state.lock().await
-    }
     
-    /// Wait for concurrent mutations to the pod's state to finish and return the most recent known
-    /// state
-    pub async fn state_wait(&self) -> PodStateKnown {
-        self.state.wait().await
+    /// Get a handle to access this pod's state
+    pub fn state(&self) -> &PodStateHandle {
+        &self.state
+    }
+
+    /// Get immutable access to the pod's configuration data
+    pub fn config(&self) -> &PodConfig {
+        &self.config
     }
 
     /// Load the pod from config files located in the given directory
@@ -97,68 +81,12 @@ impl Pod {
     }
 }
 
-impl PodStateHandle {
-    fn new(state: PodStateKnown) -> Self {
-        let (tx, _) = tokio::sync::watch::channel(PodState::from(&state));
-        let lock = Mutex::new(state);
-
-        Self { lock, tx }
-    }
-
-    /// Lock the handle to allow mutations to the current state
-    pub async fn lock(&self) -> PodStateWriteHandle {
-        let lock = self.lock.lock().await;
-        self.tx.send_replace(PodState::Transit);
-
-        PodStateWriteHandle {
-            lock,
-            tx: self.tx.clone(),
-        }
-    }
-    
-    /// Wait for all writers to finish and return the most current state of the pod
-    pub async fn wait(&self) -> PodStateKnown {
-        let lock = self.lock.lock().await;
-        lock.clone()
-    }
-
-    /// Get the current state
-    pub fn current(&self) -> PodState {
-        self.lock
-            .try_lock()
-            .as_deref()
-            .map(Into::into)
-            .unwrap_or(PodState::Transit)
-    }
-}
-
 impl From<&PodStateKnown> for PodState {
     fn from(value: &PodStateKnown) -> Self {
         match value {
             PodStateKnown::Disabled => PodState::Disabled,
             PodStateKnown::Paused(..) => PodState::Paused,
             PodStateKnown::Enabled(..) => PodState::Enabled,
-        }
-    }
-}
-
-impl<'a> PodStateWriteHandle<'a> {
-    /// Get an immutable reference to the current state
-    pub fn state(&self) -> &PodStateKnown {
-        &self.lock
-    }
-
-    /// Set the current state to the given value
-    pub fn set(&mut self, state: PodStateKnown) {
-        self.tx.send_replace((&state).into());
-        *self.lock = state;
-    }
-}
-
-impl Drop for PodStateWriteHandle<'_> {
-    fn drop(&mut self) {
-        if *self.tx.borrow() == PodState::Transit {
-            let _ = self.tx.send(PodState::from(&*self.lock));
         }
     }
 }

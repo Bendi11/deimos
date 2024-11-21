@@ -1,20 +1,14 @@
 use std::future::Future;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use async_trait::async_trait;
-use auth::{ApiAuthorization, ApiAuthorizationConfig, ApiAuthorizationPersistent, PendingTokenStream};
-use bytes::Bytes;
-use futures::StreamExt;
+use auth::{ApiAuthorization, ApiAuthorizationConfig, ApiAuthorizationPersistent};
 use igd_next::PortMappingProtocol;
-use pin_project::pin_project;
 use tokio_util::sync::CancellationToken;
 use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Server, ServerTlsConfig};
 use zeroize::Zeroizing;
 
-use crate::pod::docker::logs::PodLogStream;
-use crate::pod::id::DeimosId;
-use crate::pod::{Pod, PodState, PodStateStream};
+use crate::pod::{Pod, PodState};
 
 use super::upnp::{Upnp, UpnpLease, UpnpLeaseData};
 use super::Deimos;
@@ -22,6 +16,7 @@ use super::Deimos;
 use deimosproto::{self as proto};
 
 mod auth;
+mod grpc;
 
 /// State required exclusively for the gRPC server including UPnP port leases.
 pub struct ApiState {
@@ -92,9 +87,43 @@ impl ApiState {
             tokens: self.auth.persistent(),
         }
     }
-    
-    /// Apply settings given in the API configuration to create a new gRPC server
-    async fn init_server(config: &ApiConfig) -> Result<Server, ApiInitError> {
+}
+
+impl Deimos {
+    /// Load all specified certificates from the paths specified in the config and attempt to run
+    /// the server to completion.
+    /// This method should not return until the [CancellationToken] has been cancelled.
+    pub async fn api_task(self: Arc<Self>, cancel: CancellationToken) {
+        let public = match self.clone().run_public_server(&cancel).await {
+            Ok(fut) => fut,
+            Err(e) => {
+                tracing::error!("Failed to create public gRPC server: {e}");
+                return
+            }
+        };
+
+        let internal = match self.run_internal_server(&cancel).await {
+            Ok(internal) => internal,
+            Err(e) => {
+                tracing::error!("Failed to create internal gRPC server: {e}");
+                return
+            }
+        };
+
+        tokio::select! {
+            _ = cancel.cancelled() => {},
+            result = public => if let Err(e) = result {
+                tracing::error!("gRPC server error: {e:?}");
+            },
+            result = internal => if let Err(e) = result {
+                tracing::error!("gRPC private API error: {e:?}");
+            }
+        }
+    }
+
+    async fn run_public_server(self: Arc<Self>, cancel: &CancellationToken) -> Result<impl Future<Output = Result<(), tonic::transport::Error>> + use<'_>, ApiInitError> {
+        let config = &self.api.config;
+
         let certificate = deimosproto::util::load_check_permissions(&config.certificate)
             .await
             .map(Zeroizing::new)
@@ -106,32 +135,14 @@ impl ApiState {
 
         let identity = tonic::transport::Identity::from_pem(certificate, privkey);
 
-        let server = Server::builder()
+        let mut server = Server::builder()
             .timeout(config.timeout)
             .tls_config(
                 ServerTlsConfig::new()
                     .identity(identity)
             )?;
 
-        Ok(server)
-    }
-}
-
-impl Deimos {
-    /// Load all specified certificates from the paths specified in the config and attempt to run
-    /// the server to completion.
-    /// This method should not return until the [CancellationToken] has been cancelled.
-    pub async fn api_task(self: Arc<Self>, cancel: CancellationToken) {
-        let mut server = match ApiState::init_server(&self.api.config).await {
-            Ok(server) => server,
-            Err(e) => {
-                tracing::error!("Failed to initialize gRPC server: {e}");
-                return;
-            }
-        };
-
-
-        let result = server
+        Ok(server
             .add_service(
                 InterceptedService::new(
                     proto::server::DeimosServiceServer::from_arc(self.clone()),
@@ -139,30 +150,13 @@ impl Deimos {
                 )
             )
             .add_service(proto::authserver::DeimosAuthorizationServer::from_arc(self.clone()))
-            .serve_with_shutdown(self.api.config.bind, cancel.cancelled());
-
-        let internal = match self.clone().run_internal_server(cancel.clone()) {
-            Ok(internal) => internal,
-            Err(e) => {
-                tracing::error!("Failed to create internal server: {e}");
-                return;
-            }
-        };
-
-        tokio::select! {
-            _ = cancel.cancelled() => {},
-            result = result => if let Err(e) = result {
-                tracing::error!("gRPC server error: {e:?}");
-            },
-            result = internal => if let Err(e) = result {
-                tracing::error!("gRPC private API error: {e:?}");
-            }
-        }
+            .serve_with_shutdown(self.api.config.bind, cancel.cancelled())
+        )
     }
 
     /// Apply the settings in the given configuration to create a local socket that hosts the
     /// private API
-    fn run_internal_server(self: Arc<Self>, cancel: CancellationToken) -> Result<impl Future<Output = Result<(), tonic::transport::Error>>, ApiInitError> {
+    async fn run_internal_server(self: Arc<Self>, cancel: &CancellationToken) -> Result<impl Future<Output = Result<(), tonic::transport::Error>> + use<'_>, ApiInitError> {
         #[cfg(unix)]
         {
             use tokio::net::UnixListener;
@@ -217,163 +211,6 @@ impl From<PodState> for proto::PodState {
             PodState::Transit => proto::PodState::Transit,
             PodState::Paused => proto::PodState::Paused,
             PodState::Enabled => proto::PodState::Enabled,
-        }
-    }
-}
-
-#[async_trait]
-impl deimosproto::authserver::DeimosAuthorization for Deimos {
-    type RequestTokenStream = PendingTokenStream;
-
-    async fn request_token(self: Arc<Self>, request: tonic::Request<deimosproto::TokenRequest>) -> Result<tonic::Response<Self::RequestTokenStream>, tonic::Status> {
-        let requester = request.remote_addr().ok_or_else(|| tonic::Status::failed_precondition("Failed to get IP address of requester"))?;
-        let username = Arc::from(request.into_inner().user);
-        Ok(tonic::Response::new(self.api.auth.create_request(requester.ip(), username).await))
-    }
-}
-
-#[async_trait]
-impl proto::server::DeimosService for Deimos {
-    async fn query_pods(
-        self: Arc<Self>,
-        _: tonic::Request<proto::QueryPodsRequest>,
-    ) -> Result<tonic::Response<proto::QueryPodsResponse>, tonic::Status> {
-        let pods = self
-            .pods
-            .iter()
-            .map(|(_, pod)| proto::PodBrief {
-                id: pod.id().owned(),
-                title: pod.title().to_owned(),
-                state: proto::PodState::from(pod.state()) as i32,
-            })
-            .collect::<Vec<_>>();
-
-        Ok(tonic::Response::new(proto::QueryPodsResponse { pods }))
-    }
-
-    async fn update_pod(
-        self: Arc<Self>,
-        req: tonic::Request<proto::UpdatePodRequest>,
-    ) -> Result<tonic::Response<proto::UpdatePodResponse>, tonic::Status> {
-        let req = req.into_inner();
-        let pod = self.lookup_pod(req.id)?;
-        let id = pod.id();
-
-        match proto::PodState::try_from(req.method) {
-            Ok(proto::PodState::Disabled) => tokio::task::spawn(async move {
-                if let Err(e) = self.pods.disable(pod).await {
-                    tracing::error!(
-                        "Failed to disable pod {} in response to API request: {}",
-                        id,
-                        e
-                    );
-                }
-            }),
-            Ok(proto::PodState::Enabled) => tokio::task::spawn(async move {
-                if let Err(e) = self.pods.enable(pod).await {
-                    tracing::error!(
-                        "Failed to enable pod {} in response to API request: {}",
-                        id,
-                        e
-                    );
-                }
-            }),
-            Ok(proto::PodState::Paused) => tokio::task::spawn(async move {
-                if let Err(e) = self.pods.pause(pod).await {
-                    tracing::error!(
-                        "Failed to puase pod {} in response to API request: {}",
-                        id,
-                        e
-                    );
-                }
-            }),
-            Ok(proto::PodState::Transit) => {
-                return Err(tonic::Status::invalid_argument(String::from(
-                    "Cannot set pod to reserved state Transit",
-                )))
-            }
-            Err(_) => {
-                return Err(tonic::Status::invalid_argument(format!(
-                    "Unknown pod state enumeration value {}",
-                    req.method
-                )))
-            }
-        };
-
-        Ok(tonic::Response::new(proto::UpdatePodResponse {}))
-    }
-
-    type SubscribePodStatusStream = futures::stream::Map<
-        PodStateStream,
-        Box<PodStatusApiMapper>,
-    >;
-
-    async fn subscribe_pod_status(
-        self: Arc<Self>,
-        _: tonic::Request<proto::PodStatusStreamRequest>,
-    ) -> Result<tonic::Response<Self::SubscribePodStatusStream>, tonic::Status> {
-        let stream = self.pods.stream().map(Box::<PodStatusApiMapper>::from(Box::new(move |(id, state)| {
-            Ok(proto::PodStatusNotification {
-                id: id.owned(),
-                state: proto::PodState::from(state) as i32,
-            })
-        })));
-
-        Ok(tonic::Response::new(stream))
-    }
-
-    type SubscribePodLogsStream = futures::stream::Map<
-        PodLogStream,
-        Box<PodLogApiMapper>
-    >;
-
-    async fn subscribe_pod_logs(self: Arc<Self>, req: tonic::Request<proto::PodLogStreamRequest>) -> Result<tonic::Response<Self::SubscribePodLogsStream>, tonic::Status> {
-        let pod = self.lookup_pod(req.into_inner().id)?;
-        tracing::trace!("Client subscribed to logs for {}", pod.id());
-
-        self
-            .pods
-            .subscribe_logs(pod)
-            .await
-            .map_err(|e| tonic::Status::failed_precondition(e.to_string()))
-            .map(|sub|
-                tonic::Response::new(
-                    sub
-                        .map(
-                            Box::<PodLogApiMapper>::from(
-                                Box::new(|bytes: Bytes|
-                                    Ok(
-                                        proto::PodLogChunk {
-                                            chunk: bytes.to_vec()
-                                        }
-                                    )
-                                )
-                            )
-                        )
-                )
-            )
-    }
-}
-
-type PodStatusApiMapper = dyn FnMut((DeimosId, PodState)) -> Result<proto::PodStatusNotification, tonic::Status> + Send + Sync;
-type PodLogApiMapper = dyn FnMut(Bytes) -> Result<proto::PodLogChunk, tonic::Status> + Send + Sync;
-
-#[pin_project]
-pub struct RequestTokenFuture(#[pin] tokio::sync::oneshot::Receiver<proto::Token>);
-
-impl futures::Future for RequestTokenFuture {
-    type Output = Result<proto::Token, tonic::Status>;
-
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        let recv = self.project();
-        match recv.0.poll(cx) {
-            std::task::Poll::Ready(val) => std::task::Poll::Ready(
-                match val {
-                    Ok(val) => Ok(val),
-                    Err(_) => Err(tonic::Status::internal("oneshot receiver"))
-                }
-            ),
-            std::task::Poll::Pending => std::task::Poll::Pending,
         }
     }
 }

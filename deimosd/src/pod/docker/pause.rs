@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use crate::pod::{state::PodPaused, Pod, PodManager, PodStateKnown};
+use crate::pod::{state::{PodPaused, PodStateWriteHandle}, Pod, PodManager, PodStateKnown};
 
 impl PodManager {
     /// Pause the given container if it is enabled and running, or no-op
-    pub async fn pause(&self, pod: Arc<Pod>) -> Result<(), PausePodResult> {
-        let mut lock = pod.state_lock().await;
+    pub async fn pause(&self, pod: Arc<Pod>, mut lock: PodStateWriteHandle<'_>) -> Result<(), PausePodResult> {
         match lock.state() {
             PodStateKnown::Disabled => Err(PausePodResult::PodDisabled),
             PodStateKnown::Paused(..) => Ok(()),

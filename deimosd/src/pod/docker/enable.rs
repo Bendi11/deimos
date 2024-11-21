@@ -2,15 +2,15 @@ use std::{collections::HashMap, sync::Arc};
 
 use bollard::secret::PortBinding;
 
-use crate::{pod::{config::PodDockerConfig, id::{DeimosId, DockerId}, state::PodEnable, Pod, PodManager, PodStateKnown}, server::upnp::UpnpLeaseData};
+use crate::{pod::{config::PodDockerConfig, id::{DeimosId, DockerId}, state::{PodEnable, PodStateWriteHandle}, Pod, PodManager, PodStateKnown}, server::upnp::UpnpLeaseData};
 
 impl PodManager {
     /// Top-level operation to enable the given pod.
     /// Creates and starts Docker container as required based on the current state of the pod.
     /// If the pod is already enabled, this is a no-op.
-    pub async fn enable(&self, pod: Arc<Pod>) -> Result<(), PodEnableError> {
+    pub async fn enable(&self, pod: Arc<Pod>, mut lock: PodStateWriteHandle<'_>) -> Result<(), PodEnableError> {
         let leases = pod
-            .config
+            .config()
             .docker
             .port
             .iter()
@@ -24,7 +24,6 @@ impl PodManager {
             )
             .collect::<Vec<_>>();
 
-        let mut lock = pod.state_lock().await;
         let (upnp_lease, docker_id) = match lock.state() {
             PodStateKnown::Enabled(..) => return Ok(()),
             PodStateKnown::Paused(ref paused) => {
@@ -57,7 +56,7 @@ impl PodManager {
     }
     
     async fn create_container(&self, pod: Arc<Pod>) -> Result<DockerId, PodEnableError> {
-        let config = docker_config(&pod.config.docker);
+        let config = docker_config(&pod.config().docker);
         let create_response = self
             .docker
             .create_container(
