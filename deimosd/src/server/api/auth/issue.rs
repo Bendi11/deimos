@@ -17,17 +17,19 @@ pub struct PendingTokenStream {
 }
 
 impl ApiAuthorization {
-    pub fn issue(&self, name: String) -> Result<ApiToken, ApiTokenIssueError> {
-        if self.tokens.iter().any(|entry| *entry.value().user == name) {
-            return Err(ApiTokenIssueError::UsernameInUse(name))
-        }
-
+    /// Approve the token request with the given username
+    pub fn approve(&self, request: ApiTokenPending) -> Result<ApiToken, ApiTokenIssueError> {
+        
         for _ in 0..16 {
-            let token = ApiToken::rand(OsRng, name.clone());
+            let token = ApiToken::rand(OsRng, request.user.clone());
             let base64 = token.key.to_base64();
             match self.tokens.get(&base64) {
                 Some(exist) => {
-                    tracing::warn!("Generated API token identical to existing: new for '{}' collides with token issued for '{}'", token.user, exist.user);
+                    tracing::warn!(
+                        "Generated API token identical to existing: new for '{}' collides with token issued for '{}'",
+                        token.user,
+                        exist.user
+                    );
                 },
                 None => {
                     self.tokens.insert(token.key.to_base64(), token.clone());
@@ -44,8 +46,8 @@ impl ApiAuthorization {
         let (resolve, stream) = PendingTokenStream::new(self.clone(), user.clone());
         match self.valid_username(&user) {
             Ok(_) => {
-                let mut pending = self.pending.lock().unwrap();
-                pending.insert(
+                self.pending.insert(
+                    user.clone(),
                     ApiTokenPending {
                         user,
                         requested_at: chrono::Utc::now(),
@@ -67,7 +69,7 @@ impl ApiAuthorization {
     fn valid_username(&self, user: &str) -> Result<(), ApiTokenIssueError> {
         match user.chars().all(|c| c.is_ascii_alphanumeric() || c.is_ascii_punctuation()) {
             true => match self.tokens.iter().all(|entry| *entry.value().user != *user) {
-                true => match self.pending.lock().unwrap().iter().all(|pending| *pending.user != *user) {
+                true => match self.pending.contains_key(user) {
                     true => Ok(()),
                     false => Err(ApiTokenIssueError::UsernameInUse(user.to_owned())),
                 },

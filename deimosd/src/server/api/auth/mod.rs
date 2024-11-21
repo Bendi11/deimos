@@ -5,11 +5,13 @@ use dashmap::DashMap;
 use deimosproto::auth::DeimosTokenKey;
 use rand::{CryptoRng, Rng};
 use tokio::sync::oneshot;
-use tonic::service::Interceptor;
+use tonic::{async_trait, service::Interceptor};
 
 
 mod issue;
 pub use issue::{ApiTokenIssueError, PendingTokenStream};
+
+use crate::server::Deimos;
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize,)]
 pub struct ApiToken {
@@ -30,7 +32,7 @@ pub struct ApiTokenPending {
     resolve: oneshot::Sender<Result<ApiToken, ApiTokenIssueError>>,
 }
 
-type PendingTokensCollection = Arc<std::sync::Mutex<BTreeSet<ApiTokenPending>>>;
+type PendingTokensCollection = Arc<DashMap<Arc<str>, ApiTokenPending>>;
 
 /// Authorization state for the gRPC API, tracking all issued tokens
 #[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -76,6 +78,53 @@ impl ApiAuthorization {
     }
 }
 
+#[async_trait]
+impl deimosproto::internal_server::Internal for Deimos {
+    async fn get_pending(self: Arc<Self>, _req: tonic::Request<deimosproto::GetPendingRequest>)
+        -> Result<tonic::Response<deimosproto::GetPendingResponse>, tonic::Status> {
+        let pending = self
+            .api
+            .auth
+            .pending
+            .iter()
+            .map(|pending| deimosproto::PendingTokenRequest {
+                username: pending.user.to_string(),
+                requested_dt: pending.requested_at.timestamp(),
+                requester_address: pending.requester.to_string(),
+            })
+            .collect();
+
+        Ok(
+            tonic::Response::new(deimosproto::GetPendingResponse { pending })
+        )
+    }
+
+    async fn approve(self: Arc<Self>, req: tonic::Request<deimosproto::ApproveRequest>)
+        -> Result<tonic::Response<deimosproto::ApproveResponse>, tonic::Status> {
+        let user = req.into_inner().username;
+
+        let pending = self.api.auth.pending.remove(&*user);
+
+        match pending {
+            Some((user, pend)) => {
+                tracing::info!("Approved token request for '{}'", user);
+
+                self
+                    .api
+                    .auth
+                    .approve(pend)
+                    .map(|_| tonic::Response::new(deimosproto::ApproveResponse {}))
+                    .map_err(|e| tonic::Status::internal(e.to_string()))
+            },
+            None => {
+                Err(
+                    tonic::Status::not_found(format!("Request with username {} not found", user))
+                )
+            }
+        }
+    }
+}
+
 impl Interceptor for ApiAuthorization {
     fn call(&mut self, request: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
         if true {
@@ -94,8 +143,7 @@ impl Interceptor for ApiAuthorization {
 
 impl ApiToken {
     /// Generate a new token from the given source of randomness
-    pub fn rand<R: Rng + CryptoRng>(mut rng: R, user: String) -> Self {
-        let user = user.into();
+    pub fn rand<R: Rng + CryptoRng>(mut rng: R, user: Arc<str>) -> Self {
         let issued = Utc::now();
         let mut key = vec![0u8 ; 64];
         rng.fill_bytes(&mut key);

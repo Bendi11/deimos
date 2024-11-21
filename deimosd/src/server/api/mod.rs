@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -38,6 +39,8 @@ pub struct ApiState {
 pub struct ApiConfig {
     /// Address to bind to when serving the public interface
     pub bind: SocketAddr,
+    /// Path to create a UDS socket for the internal priviledged API
+    pub internal_bind: PathBuf,
     /// Enable UPnP port forwarding for the public API
     #[serde(default)]
     pub upnp: bool,
@@ -138,11 +141,61 @@ impl Deimos {
             .add_service(proto::authserver::DeimosAuthorizationServer::from_arc(self.clone()))
             .serve_with_shutdown(self.api.config.bind, cancel.cancelled());
 
+        let internal = match self.clone().run_internal_server(cancel.clone()) {
+            Ok(internal) => internal,
+            Err(e) => {
+                tracing::error!("Failed to create internal server: {e}");
+                return;
+            }
+        };
+
         tokio::select! {
             _ = cancel.cancelled() => {},
             result = result => if let Err(e) = result {
                 tracing::error!("gRPC server error: {e}");
+            },
+            result = internal => if let Err(e) = result {
+                tracing::error!("gRPC private API error: {e}");
             }
+        }
+    }
+
+    /// Apply the settings in the given configuration to create a local socket that hosts the
+    /// private API
+    fn run_internal_server(self: Arc<Self>, cancel: CancellationToken) -> Result<impl Future<Output = Result<(), tonic::transport::Error>>, ApiInitError> {
+        #[cfg(unix)]
+        {
+            use tokio::net::UnixListener;
+            use tokio_stream::wrappers::UnixListenerStream;
+            
+            let bind = self.api.config.internal_bind.clone();
+            if let Some(parent) = bind.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|err| ApiInitError::CreateDir { path: parent.to_owned(), err })?;
+            }
+
+            if let Ok(true) = std::fs::exists(&bind) {
+                if let Err(e) = std::fs::remove_file(&bind) {
+                    tracing::warn!("Failed to delete old socket {}: {}", bind.display(), e);
+                }
+            }
+
+            let uds = UnixListener::bind(&bind)
+                .map_err(|err| ApiInitError::CreateSocket { path: bind.clone(), err })?;
+            let stream = UnixListenerStream::new(uds);
+
+            tracing::info!("Created socket at {} for private API", bind.display());
+            
+            Ok(async move {
+                Server::builder()
+                    .add_service(deimosproto::internal_server::InternalServer::from_arc(self))
+                    .serve_with_incoming_shutdown(stream, cancel.cancelled())
+                    .await
+            })
+        }
+        #[cfg(not(unix))]
+        {
+            panic!("Cannot create private API on non unix");
         }
     }
 
@@ -331,6 +384,16 @@ pub enum ApiInitError {
     LoadSensitiveFile(PathBuf, std::io::Error),
     #[error("Failed to set server TLS configuration: {}", .0)]
     TlsConfig(#[from] tonic::transport::Error),
+    #[error("Failed to create directory {} for local socket: {}", path.display(), err)]
+    CreateDir {
+        path: PathBuf,
+        err: std::io::Error,
+    },
+    #[error("Failed to create socket {}: {}", path.display(), err)]
+    CreateSocket {
+        path: PathBuf,
+        err: std::io::Error,
+    },
 }
 
 impl ApiConfig {
