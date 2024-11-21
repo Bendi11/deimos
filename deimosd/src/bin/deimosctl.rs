@@ -3,13 +3,13 @@ use std::{path::PathBuf, time::Duration};
 use chrono::DateTime;
 use clap::{Parser, Subcommand};
 use hyper_util::rt::TokioIo;
-use tokio::net::UnixStream;
 use tonic::transport::{Channel, Uri};
 use tower::service_fn;
 
-
+#[cfg(unix)]
 #[tokio::main]
 async fn main() {
+    use tokio::net::UnixStream;
     let args = DeimosCtlArgs::parse();
     
     let channel = Channel::from_static("http://localhost:9115")
@@ -40,6 +40,11 @@ async fn main() {
             }
         }
     }
+}
+
+#[cfg(not(unix))]
+fn main() {
+    panic!("Cannot run internal API controller on non-unix");
 }
 
 #[derive(Parser)]

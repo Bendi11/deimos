@@ -195,7 +195,9 @@ impl Deimos {
         }
         #[cfg(not(unix))]
         {
-            panic!("Cannot create private API on non unix");
+            Ok(async move {
+                panic!("Cannot create internal API socket on non-unix");
+            }) 
         }
     }
 
