@@ -22,7 +22,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
         Ok(c) => c,
         Err(e) => return stdout
             .execute(SetForegroundColor(Color::Red))?
-            .execute(Print(format_args!("Failed to connect to deimos daemon: {}", e)))?
+            .execute(Print(format_args!("Failed to connect to deimos daemon: {}\n", e)))?
             .execute(ResetColor)
             .map(|_| ExitCode::FAILURE)
     };
@@ -37,12 +37,12 @@ pub async fn main() -> std::io::Result<ExitCode> {
             match client.approve(request).await {
                 Ok(_) => stdout
                     .execute(SetForegroundColor(Color::Green))?
-                    .execute(Print(format_args!("Approved token request for {}", approve.username.bold())))?
+                    .execute(Print(format_args!("Approved token request for {}\n", approve.username.bold())))?
                     .execute(ResetColor)
                     .map(|_| ExitCode::SUCCESS),
                 Err(e) => stdout
                     .execute(SetForegroundColor(Color::Red))?
-                    .execute(Print(format_args!("Failed to approve token request for {}: {}", approve.username.bold(), e)))?
+                    .execute(Print(format_args!("Failed to approve token request for {}: {}\n", approve.username.bold(), e)))?
                     .execute(ResetColor)
                     .map(|_| ExitCode::FAILURE)
             }
@@ -53,7 +53,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
                 Ok(v) => v.into_inner().pending,
                 Err(e) => return stdout
                     .execute(SetForegroundColor(Color::Red))?
-                    .execute(Print(format_args!("Failed to retrieve token requests: {}", e)))?
+                    .execute(Print(format_args!("Failed to retrieve token requests: {}\n", e)))?
                     .execute(ResetColor)
                     .map(|_| ExitCode::FAILURE)
             };
