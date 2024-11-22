@@ -112,6 +112,32 @@ impl PodManager {
         let lock = pod.state().read().await;
 
         match action.as_str() {
+            "unpause" => if let PodStateKnown::Paused(ref paused) = *lock {
+                tracing::warn!("Paused pod {} got unpause event unexpectedly", pod.id());
+                match self.docker.pause_container(&paused.docker_id).await {
+                    Ok(..) => {},
+                    Err(e) => {
+                        tracing::warn!("Failed to re-pause container {} after unexpected resume: {}", pod.id(), e);
+                        let lock = pod.state().upgrade(lock);
+                        let _ = self.disable(pod.clone(), lock).await;
+                    }
+                }
+            },
+            "kill" => if let PodStateKnown::Enabled(..) = *lock {
+                tracing::warn!("Enabled pod {} got kill event unexpectedly", pod.id());
+                let lock = pod.state().upgrade(lock);
+                let _ = self.disable(pod.clone(), lock).await;
+            },
+            "stop" => if let PodStateKnown::Enabled(..) = *lock {
+                tracing::warn!("Enabled pod {} got stop request unexpectedly", pod.id());
+                let lock = pod.state().upgrade(lock);
+                let _ = self.enable(pod.clone(), lock).await;
+            },
+            "oom" => if let PodStateKnown::Paused(..) | PodStateKnown::Enabled(..) = *lock {
+                tracing::warn!("Running pod {} got OOM", pod.id());
+                let lock = pod.state().upgrade(lock);
+                let _ = self.disable(pod.clone(), lock).await;
+            },
             "die" => match *lock {
                 PodStateKnown::Disabled => {
 

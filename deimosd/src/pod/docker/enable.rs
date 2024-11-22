@@ -81,7 +81,7 @@ impl PodManager {
         Ok(docker_id)
     }
 
-    async fn start_container(&self, pod: &Pod, container: &DockerId) -> Result<(), PodEnableError> {
+    pub async fn start_container(&self, pod: &Pod, container: &DockerId) -> Result<(), PodEnableError> {
         tracing::trace!("Starting container {} for {}", container, pod.id());
 
         self.docker
@@ -93,7 +93,7 @@ impl PodManager {
             .map_err(PodEnableError::StartContainer)
     }
 
-    async fn resume_container(&self, pod: &Pod, container: &DockerId) -> Result<(), PodEnableError> {
+    pub async fn resume_container(&self, pod: &Pod, container: &DockerId) -> Result<(), PodEnableError> {
         tracing::trace!("Resuming paused container {} for {}", container, pod.id());
 
         self.docker
