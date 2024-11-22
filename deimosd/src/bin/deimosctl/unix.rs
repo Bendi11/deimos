@@ -15,11 +15,17 @@ pub async fn main() -> std::io::Result<ExitCode> {
     let args = DeimosCtlArgs::parse();
     let mut stdout = std::io::stdout();
 
-    let channel = Channel::builder(Uri::default())
+    let channel = match Channel::builder(Uri::default())
         .connect_timeout(Duration::from_secs(args.timeout))
         .connect_with_connector(UnixSocketConnector(args.bind))
-        .await
-        .unwrap();
+        .await {
+        Ok(c) => c,
+        Err(e) => return stdout
+            .execute(SetForegroundColor(Color::Red))?
+            .execute(Print(format_args!("Failed to connect to deimos daemon: {}", e)))?
+            .execute(ResetColor)
+            .map(|_| ExitCode::FAILURE)
+    };
 
     let mut client = deimosproto::internal_client::InternalClient::new(channel);
     match args.cmd {
@@ -89,7 +95,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
 #[derive(Parser)]
 #[command(about = "")]
 struct DeimosCtlArgs {
-    #[arg(long, help="Connection timeout in seconds")]
+    #[arg(long, help="Connection timeout in seconds", default_value="5")]
     timeout: u64,
     #[arg(short, long, default_value="/tmp/deimos/api")]
     bind: PathBuf,
