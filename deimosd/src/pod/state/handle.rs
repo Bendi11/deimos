@@ -9,6 +9,8 @@ use super::{PodState, PodStateKnown};
 /// Pods state handles are responsible for maintaining a number of invariants across the server.
 /// - All pod state mutations must be sent to subscribers
 /// - No more than one task may perform mutating operations on a pod's state at a time
+/// - Tasks must be able to read the current state without blocking even if a transaction is
+///     occuring - in this case they should read that the state is in transit
 pub struct PodStateHandle {
     lock: Mutex<PodStateKnown>,
     tx: tokio::sync::watch::Sender<PodState>,
@@ -57,21 +59,16 @@ impl PodStateHandle {
         PodStateReadHandle(self.lock.lock().await)
     }
     
-    /// Upgrade a pod 
+    /// Upgrade a pod read handle to allow state mutations
     pub fn upgrade<'a>(&self, read: PodStateReadHandle<'a>) -> PodStateWriteHandle<'a> {
         PodStateWriteHandle {
             lock: read.0,
             tx: self.tx.clone(),
         }
     }
-    
-    /// Wait for all writers to finish and return the most current state of the pod
-    pub async fn wait(&self) -> PodStateKnown {
-        let lock = self.lock.lock().await;
-        lock.clone()
-    }
 
-    /// Get the current state
+    /// Get the current state without blocking, returning [PodState::Transit] if a transaction is
+    /// happening concurrently to this call
     pub fn current(&self) -> PodState {
         self.lock
             .try_lock()
@@ -108,4 +105,3 @@ impl Drop for PodStateWriteHandle<'_> {
         }
     }
 }
-

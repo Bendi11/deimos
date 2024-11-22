@@ -6,7 +6,7 @@ use super::{config::PodConfig, id::{DeimosId, DockerId}};
 
 mod handle;
 
-pub use handle::{PodStateHandle, PodStateWriteHandle, PodStateReadHandle};
+pub use handle::{PodStateHandle, PodStateWriteHandle};
 
 /// Represents a single pod with associated config and running Docker container if any exists
 pub struct Pod {

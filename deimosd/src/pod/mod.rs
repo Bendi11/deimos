@@ -1,11 +1,12 @@
 use std::{
-    collections::HashMap, path::{Path, PathBuf}, sync::Arc, task::Poll, time::Duration
+    collections::HashMap, path::{Path, PathBuf}, sync::Arc, time::Duration
 };
 
-use bollard::{secret::EventMessageTypeEnum, system::EventsOptions, Docker};
+use bollard::Docker;
 use dashmap::DashMap;
+use docker::events::DockerEventStream;
 use futures::{
-    stream::{BoxStream, SelectAll}, Stream, StreamExt
+    stream::SelectAll, Stream, StreamExt
 };
 use id::{DeimosId, DockerId};
 
@@ -26,8 +27,10 @@ pub struct PodManager {
     docker: Docker,
     upnp: Upnp,
     pods: HashMap<DeimosId, Arc<Pod>>,
-    reverse_lookup: Arc<DashMap<DockerId, Arc<Pod>>>,
+    reverse_lookup: ReversePodLookup,
 }
+
+type ReversePodLookup = Arc<DashMap<DockerId, Arc<Pod>>>;
 
 pub type PodStateStreamMapper = dyn FnMut(PodState) -> (DeimosId, PodState) + Send + Sync;
 pub type PodStateStream = SelectAll<
@@ -36,38 +39,6 @@ pub type PodStateStream = SelectAll<
         Box<PodStateStreamMapper>,
     >,
 >;
-
-/// A stream that maps events received from the local Docker server to their corresponding pods
-pub struct DockerEventStream {
-    inner: BoxStream<'static, Result<bollard::secret::EventMessage, bollard::errors::Error>>,
-    docker: Docker,
-    reverse: Arc<DashMap<DockerId, Arc<Pod>>>,
-}
-
-impl DockerEventStream {
-    fn subscribe(docker: &Docker) -> BoxStream<'static, Result<bollard::secret::EventMessage, bollard::errors::Error>> {
-        let mut filters = HashMap::with_capacity(1);
-        filters.insert("type", vec!["container"]);
-
-        tracing::trace!("Subscribing to Docker event stream with filters {:?}", filters);
-        docker.events(
-            Some(
-                EventsOptions::<&'static str> {
-                    filters,
-                    ..Default::default()
-                }
-            )
-        ).boxed()
-    }
-
-    fn new(docker: Docker, reverse: Arc<DashMap<DockerId, Arc<Pod>>>) -> Self {
-        Self {
-            inner: Self::subscribe(&docker),
-            docker,
-            reverse,
-        }
-    }
-}
 
 impl PodManager {
     /// Load a config TOML file from the given path, and use the options specified inside to
@@ -222,51 +193,6 @@ impl PodManager {
     /// Get an immutable iterator over references to the managed pods
     pub fn iter(&self) -> impl Iterator<Item = (&DeimosId, &Arc<Pod>)> {
         self.pods.iter()
-    }
-}
-
-impl Stream for DockerEventStream {
-    type Item = (Arc<Pod>, String);
-
-    fn poll_next(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            let next = futures::ready!(self.inner.as_mut().poll_next(cx));
-            match next {
-                Some(event) => match event {
-                    Ok(ev) => match ev.typ {
-                        Some(EventMessageTypeEnum::CONTAINER) => {
-                            let Some(actor) = ev.actor else {
-                                tracing::warn!("Received container event with no actor");
-                                continue;
-                            };
-
-                            let Some(id) = actor.id else {
-                                tracing::warn!("Received container event with no actor ID");
-                                continue;
-                            };
-
-                            let Some(action) = ev.action else {
-                                tracing::warn!("Received container event with no action");
-                                continue;
-                            };
-
-                            if let Some(pod) = self.reverse.get(id.as_str()) {
-                                break Poll::Ready(Some((pod.clone(), action)))
-                            }
-                        },
-                        _ => {
-                            tracing::warn!("Got unwanted Docker event {:?}", ev.typ);
-                        }
-                    },
-                    Err(e) => {
-                        tracing::error!("Docker event stream closed unexpectedly: {}", e);
-                    }
-                },
-                None => {
-                    self.inner = Self::subscribe(&self.docker);
-                }
-            }
-        }
     }
 }
 
