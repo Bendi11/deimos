@@ -17,7 +17,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
     let args = DeimosCtlArgs::parse();
     let mut stdout = std::io::stdout();
 
-    let channel = match Channel::builder(Uri::default())
+    let channel = match Channel::from_static("http://localhost:1")
         .connect_timeout(Duration::from_secs(args.timeout))
         .connect_with_connector(UnixSocketConnector(args.bind))
         .await {
