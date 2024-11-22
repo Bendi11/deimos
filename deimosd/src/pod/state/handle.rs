@@ -61,6 +61,8 @@ impl PodStateHandle {
     
     /// Upgrade a pod read handle to allow state mutations
     pub fn upgrade<'a>(&self, read: PodStateReadHandle<'a>) -> PodStateWriteHandle<'a> {
+        self.tx.send_replace(PodState::Transit);
+
         PodStateWriteHandle {
             lock: read.0,
             tx: self.tx.clone(),

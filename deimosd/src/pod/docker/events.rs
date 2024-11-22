@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc, task::Poll};
 use bollard::{secret::EventMessageTypeEnum, system::EventsOptions, Docker};
 use futures::{stream::BoxStream, Stream, StreamExt};
 
-use crate::pod::{Pod, ReversePodLookup};
+use crate::pod::{Pod, PodManager, PodStateKnown, ReversePodLookup};
 
 /// A stream that maps events received from the local Docker server to their corresponding pods.
 /// Also handles resubscribing to the docker stream in case it is dropped for some reason.
@@ -11,6 +11,65 @@ pub struct DockerEventStream {
     inner: BoxStream<'static, Result<bollard::secret::EventMessage, bollard::errors::Error>>,
     docker: Docker,
     reverse: ReversePodLookup,
+}
+
+impl PodManager {
+    /// Process all Docker container events in a loop to monitor uncommanded pod state changes
+    pub fn eventloop(&self) -> impl Stream<Item = (Arc<Pod>, String)> {
+        DockerEventStream::new(self.docker.clone(), self.reverse_lookup.clone())
+    }
+    
+    /// Handle an event received from the [eventloop](Self::eventloop) stream
+    pub async fn handle_event(&self, pod: Arc<Pod>, action: String) {
+        tracing::trace!("Pod {} got event '{}'", pod.id(), action);
+        let lock = pod.state().read().await;
+
+        match action.as_str() {
+            "unpause" => if let PodStateKnown::Paused(ref paused) = *lock {
+                tracing::warn!("Paused pod {} got unpause event unexpectedly", pod.id());
+                match self.docker.pause_container(&paused.docker_id).await {
+                    Ok(..) => {},
+                    Err(e) => {
+                        tracing::warn!("Failed to re-pause container {} after unexpected resume: {}", pod.id(), e);
+                        let lock = pod.state().upgrade(lock);
+                        let _ = self.disable(pod.clone(), lock).await;
+                    }
+                }
+            },
+            "kill" => if let PodStateKnown::Enabled(..) = *lock {
+                tracing::warn!("Enabled pod {} got kill event unexpectedly", pod.id());
+                let lock = pod.state().upgrade(lock);
+                let _ = self.disable(pod.clone(), lock).await;
+            },
+            "stop" => if let PodStateKnown::Enabled(..) = *lock {
+                tracing::warn!("Enabled pod {} got stop request unexpectedly", pod.id());
+                let lock = pod.state().upgrade(lock);
+                let _ = self.enable(pod.clone(), lock).await;
+            },
+            "oom" => if let PodStateKnown::Paused(..) | PodStateKnown::Enabled(..) = *lock {
+                tracing::warn!("Running pod {} got OOM", pod.id());
+                let lock = pod.state().upgrade(lock);
+                let _ = self.disable(pod.clone(), lock).await;
+            },
+            "die" => match *lock {
+                PodStateKnown::Disabled => {
+
+                },
+                PodStateKnown::Paused(..) => {
+                    tracing::info!("Paused container {} died unexpectedly", pod.id());
+                    let lock = pod.state().upgrade(lock);
+                    let _ = self.disable(pod.clone(), lock).await;
+                },
+                PodStateKnown::Enabled(..) => {
+                    tracing::warn!("Running container {} died unexpectedly", pod.id());
+                    let lock = pod.state().upgrade(lock);
+                    let _ = self.disable(pod.clone(), lock).await;
+                }
+            },
+            _ => {},
+        }
+    }
+
 }
 
 impl DockerEventStream {
