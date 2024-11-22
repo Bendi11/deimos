@@ -11,6 +11,8 @@ use tower::Service;
 #[derive(Debug,)]
 pub struct UnixSocketConnector(PathBuf);
 
+struct TonicErrorFormat<E>(E);
+
 pub async fn main() -> std::io::Result<ExitCode> {
     let args = DeimosCtlArgs::parse();
     let mut stdout = std::io::stdout();
@@ -22,7 +24,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
         Ok(c) => c,
         Err(e) => return stdout
             .execute(SetForegroundColor(Color::Red))?
-            .execute(Print(format_args!("Failed to connect to deimos daemon: {}\n", e)))?
+            .execute(Print(format_args!("Failed to connect to deimos daemon: {}\n", TonicErrorFormat(e))))?
             .execute(ResetColor)
             .map(|_| ExitCode::FAILURE)
     };
@@ -42,7 +44,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
                     .map(|_| ExitCode::SUCCESS),
                 Err(e) => stdout
                     .execute(SetForegroundColor(Color::Red))?
-                    .execute(Print(format_args!("Failed to approve token request for {}: {}\n", approve.username.bold(), e)))?
+                    .execute(Print(format_args!("Failed to approve token request for {}: {}\n", approve.username.bold(), TonicErrorFormat(e))))?
                     .execute(ResetColor)
                     .map(|_| ExitCode::FAILURE)
             }
@@ -53,7 +55,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
                 Ok(v) => v.into_inner().pending,
                 Err(e) => return stdout
                     .execute(SetForegroundColor(Color::Red))?
-                    .execute(Print(format_args!("Failed to retrieve token requests: {}\n", e)))?
+                    .execute(Print(format_args!("Failed to retrieve token requests: {}\n", TonicErrorFormat(e))))?
                     .execute(ResetColor)
                     .map(|_| ExitCode::FAILURE)
             };
@@ -134,5 +136,18 @@ impl Service<Uri> for UnixSocketConnector {
 
     fn call(&mut self, _: Uri) -> Self::Future {
         UnixStream::connect(self.0.clone()).map(|stream| stream.map(TokioIo::new)).boxed()
+    }
+}
+
+
+impl<E: std::error::Error> std::fmt::Display for TonicErrorFormat<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0.source() {
+            Some(source) => match source.source() {
+                Some(lower) => write!(f, "{}: {}", source, lower),
+                None => std::fmt::Display::fmt(source, f),
+            },
+            None => std::fmt::Display::fmt(&self.0, f),
+        }
     }
 }

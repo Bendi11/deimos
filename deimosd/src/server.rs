@@ -35,6 +35,7 @@ pub struct DeimosConfig {
     pub upnp: UpnpConfig,
 }
 
+/// Persistent state written to a save file specified in the config [DeimosConfig::save_path]
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct DeimosPersistent {
     api: ApiPersistent,
