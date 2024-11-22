@@ -1,7 +1,7 @@
 use std::{path::PathBuf, process::ExitCode, time::Duration};
 
 use clap::{Parser, Subcommand};
-use crossterm::{style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor, Stylize}, ExecutableCommand};
+use crossterm::{style::{Attribute, Color, ContentStyle, Print, ResetColor, SetAttribute, SetForegroundColor, StyledContent, Stylize}, ExecutableCommand};
 use futures::{future::BoxFuture, FutureExt};
 use hyper_util::rt::TokioIo;
 use tokio::net::UnixStream;
@@ -11,7 +11,8 @@ use tower::Service;
 #[derive(Debug,)]
 pub struct UnixSocketConnector(PathBuf);
 
-struct TonicErrorFormat<E>(E);
+struct TonicTransportErrorFormat<E>(E);
+struct TonicStatusErrorFormat(tonic::Status);
 
 pub async fn main() -> std::io::Result<ExitCode> {
     let args = DeimosCtlArgs::parse();
@@ -24,7 +25,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
         Ok(c) => c,
         Err(e) => return stdout
             .execute(SetForegroundColor(Color::Red))?
-            .execute(Print(format_args!("Failed to connect to deimos daemon: {}\n", TonicErrorFormat(e))))?
+            .execute(Print(format_args!("Failed to connect to deimos daemon: {}\n", TonicTransportErrorFormat(e))))?
             .execute(ResetColor)
             .map(|_| ExitCode::FAILURE)
     };
@@ -44,7 +45,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
                     .map(|_| ExitCode::SUCCESS),
                 Err(e) => stdout
                     .execute(SetForegroundColor(Color::Red))?
-                    .execute(Print(format_args!("Failed to approve token request for {}: {}\n", approve.username.bold(), TonicErrorFormat(e))))?
+                    .execute(Print(format_args!("Failed to approve token request for {}: {}\n", approve.username.bold(), TonicStatusErrorFormat(e))))?
                     .execute(ResetColor)
                     .map(|_| ExitCode::FAILURE)
             }
@@ -55,13 +56,13 @@ pub async fn main() -> std::io::Result<ExitCode> {
                 Ok(v) => v.into_inner().pending,
                 Err(e) => return stdout
                     .execute(SetForegroundColor(Color::Red))?
-                    .execute(Print(format_args!("Failed to retrieve token requests: {}\n", TonicErrorFormat(e))))?
+                    .execute(Print(format_args!("Failed to retrieve token requests: {}\n", TonicStatusErrorFormat(e))))?
                     .execute(ResetColor)
                     .map(|_| ExitCode::FAILURE)
             };
 
             const USERNAME_HEADER: &str = "username";
-            const DATETIME_HEADER: &str = "datetime";
+            const DATETIME_HEADER: &str = "date";
             const REQIADDR_HEADER: &str = "address";
 
             //Width is constrained to 12 characters due to format string
@@ -86,7 +87,7 @@ pub async fn main() -> std::io::Result<ExitCode> {
             
             for (username, datetime, addr) in strings {
                 stdout
-                    .execute(Print(format_args!("{0:^1$}  {2:^3$}  {4:^5$}\n", username.bold(), uname_width, datetime, DATETIME_WIDTH, addr, addr_width)))?;
+                    .execute(Print(format_args!("{0:^1$}  {2:^3$}  {4:^5$}\n", username, uname_width, datetime, DATETIME_WIDTH, addr, addr_width)))?;
             }
 
             Ok(ExitCode::SUCCESS)
@@ -140,14 +141,28 @@ impl Service<Uri> for UnixSocketConnector {
 }
 
 
-impl<E: std::error::Error> std::fmt::Display for TonicErrorFormat<E> {
+impl<E: std::error::Error> std::fmt::Display for TonicTransportErrorFormat<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0.source() {
-            Some(source) => match source.source() {
-                Some(lower) => write!(f, "{}: {}", source, lower),
-                None => std::fmt::Display::fmt(source, f),
-            },
+            Some(source) => std::fmt::Display::fmt(source, f),
             None => std::fmt::Display::fmt(&self.0, f),
+        }
+    }
+}
+
+impl std::fmt::Display for TonicStatusErrorFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match std::error::Error::source(&self.0) {
+            Some(source) => match source.downcast_ref::<tonic::transport::Error>() {
+                Some(transport) => TonicTransportErrorFormat(transport).fmt(f),
+                None => write!(f, "{}: {}", self.0, source),
+            },
+            None => write!(
+                f,
+                "{}: {}",
+                StyledContent::new(ContentStyle::new().dim(), self.0.code()),
+                self.0.message()
+            ),
         }
     }
 }
