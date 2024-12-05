@@ -20,7 +20,6 @@ pub struct Deimos {
     api: ApiState,
 }
 
-
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DeimosConfig {

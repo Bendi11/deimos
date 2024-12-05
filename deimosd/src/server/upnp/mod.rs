@@ -26,6 +26,8 @@ pub struct Upnp {
 /// User-provided configuration options for the UPnP client
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct UpnpConfig {
+    #[serde(default="UpnpConfig::default_ip_lookup_seconds")]
+    pub ip_lookup_seconds: u32,
     /// Time to set the UPnP leases to expire after
     #[serde(default="UpnpConfig::default_renewal_seconds")]
     pub renewal_seconds: u32,
@@ -82,7 +84,18 @@ impl Upnp {
     /// Retrieve the local IP address from the network adapter and create an empty map of forwarded
     /// ports
     pub async fn new(conf: UpnpConfig) -> Result<(Self, UpnpReceiver), UpnpInitError> {
-        let local_ip = local_ip_address::local_ip()?;
+        let local_ip = loop {
+            match local_ip_address::local_ip() {
+                Ok(ip) => break ip,
+                Err(e) => {
+                    tracing::error!("Failed to get local IP: {e}");
+                    tokio::time::sleep(
+                        Duration::from_secs(conf.ip_lookup_seconds as u64)
+                    ).await;
+                }
+            }
+        };
+
         let (tx, rx) = tokio::sync::mpsc::channel(32);
 
         Ok((
@@ -224,6 +237,7 @@ impl Upnp {
 impl Default for UpnpConfig {
     fn default() -> Self {
         Self {
+            ip_lookup_seconds: Self::default_ip_lookup_seconds(),
             renewal_seconds: Self::default_renewal_seconds(),
             remove_immediate: false,
         }
@@ -233,6 +247,10 @@ impl Default for UpnpConfig {
 impl UpnpConfig {
     pub const fn default_renewal_seconds() -> u32 {
         60 * 15
+    }
+
+    pub const fn default_ip_lookup_seconds() -> u32 {
+        15
     }
 }
 
