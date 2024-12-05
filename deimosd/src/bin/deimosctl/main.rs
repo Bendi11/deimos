@@ -10,4 +10,3 @@ async fn main() -> std::io::Result<ExitCode> {
     #[cfg(not(unix))]
     { Ok(ExitCode::SUCCESS) }
 }
-

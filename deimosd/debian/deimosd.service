@@ -1,11 +1,10 @@
 [Unit]
 Description="Deimos container management gRPC server"
+Wants=network-online.target
+After=network.target network-online.target
 
 [Service]
 ExecStart=/usr/bin/deimosd
 User=deimos
 WorkingDirectory=/home/deimos
 KillSignal=SIGINT
-
-[Install]
-WantedBy=network.target

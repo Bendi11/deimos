@@ -8,6 +8,11 @@ message PendingTokenRequest {
     string requester_address = 3;
 }
 
+message ApprovedToken {
+    string username = 1;
+    int64 approved_dt = 2;
+}
+
 message GetPendingRequest {}
 
 message GetPendingResponse {
