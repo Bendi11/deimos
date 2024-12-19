@@ -18,7 +18,7 @@ async fn main() -> ExitCode {
     let filter = tracing_subscriber::filter::Targets::new()
         .with_target("bollard", LevelFilter::ERROR)
         .with_target("deimosd", LevelFilter::TRACE)
-        .with_target("deimos_shared", LevelFilter::TRACE)
+        .with_target("deimosproto", LevelFilter::TRACE)
         .with_target("tonic", LevelFilter::INFO);
 
     let subscriber = FmtSubscriber::builder()
