@@ -14,8 +14,7 @@ pub async fn load_check_permissions(path: impl AsRef<Path>) -> Result<Vec<u8>, s
         use std::os::unix::fs::PermissionsExt;
         let mode = permissions.mode();
         if mode & 0o077 != 0 {
-            tracing::error!("Sensitive file {} has group and/or other read/write permissions - change to 600 or 400", path.as_ref().display());
-            return Err(tokio::io::ErrorKind::InvalidInput.into());
+            tracing::warn!("Sensitive file {} has group and/or other read/write permissions - change to 600 or 400", path.as_ref().display());
         }
     }
 
